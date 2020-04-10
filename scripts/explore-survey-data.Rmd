@@ -1,0 +1,441 @@
+---
+title: "explore-survey-data"
+author: "Alexa Fredston-Hermann"
+date: "3/27/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Overview
+
+The goal of this script is to explore data sources for the first species for which we will build forecasts using this model. The list of species (more detail [here](https://docs.google.com/spreadsheets/d/1ega3rdLpSnSVvduP-sp5WzxAqRVrvOpRaKZKLAFYVck/edit#gid=0)) includes: 
+
+*Original species*
+
+* Spiny dogfish
+* Grey triggerfish
+* Summer flounder (fluke)
+* Shortfin squid
+
+*Alternate candidates*
+
+* Cobia
+* Butterfish
+* Winter flounder 
+* Wahoo
+* Spanish mackerel
+* King mackerel
+* Chub mackerel
+* Menhaden
+* Snowy grouper
+* Dolphinfish
+* Blueline tilefish
+* White shrimp 
+* Amberjack
+
+# Potential data sources
+
+To follow along, download each dataset from the links below and save it in a directory called `survey-data` in this repository with the same filename as I used in the code. 
+
+## Southeast Reef Fish Survey (SERFS)
+
+This data is hosted by [SEAMAP](http://www.seamap.org/datapage.html).
+
+* For exploratory purposes I downloaded the data aggregated to abundance and biomass per haul, but they have it broken down by length frequency or raw length data. 
+* Downloaded on March 27, 2020
+
+```{r packages, eval=TRUE, echo=FALSE, results="hide", message=FALSE, warning=FALSE }
+library(tidyverse)
+library(here)
+library(lubridate)
+library(magrittr)
+library(rfishbase)
+here <- here::here # resolve conflict from some stupid lubridate function
+```
+
+```{r serfs, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+sppLatin <- c("Balistes capriscus",	
+              "Paralichthys dentatus",	
+              "Squalus acanthias",	
+              "Illex illecebrosus",	
+              "Acanthocybium solandri",	
+              "Rachycentron canadum",	
+              "Scomberomorus maculatus",	
+              "Scomber colias",	
+              "Scomberomorus cavalla",
+              "Brevoortia patronus",	
+              "Pseudopleuronectes americanus",	
+              "Peprilus triacanthus",
+              "Epinephelus niveatus",
+              "Caulolatilus microps",
+              "Seriola dumerili",
+              "Litopenaeus setiferus",
+              "Coryphaena hippurus") %>% tolower()
+
+sppCommon <- c("gray triggerfish",	
+               "summer flounder",	
+               "spiny dogfish",	
+               "shortfin squid",	
+               "wahoo",	
+               "cobia",	
+               "Spanish mackerel",	
+               "Atlantic chub mackerel",
+               "King mackerel",	
+               "menhaden",	
+               "winter flounder",	
+               "butterfish",
+               "snowy grouper",
+               "blueline tilefish",
+               "greater amberjack",
+               "white shrimp",
+               "dolphinfish") %>% tolower()
+
+sppOfInterest <- cbind(sppLatin, sppCommon) %>% as.data.frame()
+
+serfsRaw <- read.delim(here::here("survey-data","southeast_reef_fish_survey_abundance_biomass_03_27_2020_raw.txt"), sep=",")
+
+serfsTidy <- serfsRaw %>%
+  rename_all(tolower) %>% 
+  mutate_all(tolower) %>% # so dataframe isn't screaming at me
+  mutate_all(funs(str_replace(., "=", ""))) %>% # raw data has random equals signs everywhere
+  mutate_all(na_if, "not applicable") %>% 
+  select_if(~!all(is.na(.))) %>%  # remove columns that just have NAs in them 
+  distinct() %>% 
+  mutate(date = mdy(date),
+         month = month(date),
+         year = year(date))
+
+serfsSummary <- serfsTidy %>% 
+  filter(speciesscientificname %in% sppOfInterest$sppLatin) %>% 
+  group_by(speciesscientificname, speciescommonname) %>% 
+  summarise(n=n()) %>% 
+  ungroup()
+
+serfsSummary
+min(serfsTidy$year, na.rm=TRUE)
+max(serfsTidy$year, na.rm=TRUE)
+```
+
+Species not in the table above did not occur in the SERFS dataset at all (although I didn't cross-check Latin name spelling and taxonomy). The number of records is fairly low for every species, except gray triggerfish, and maybe snowy grouper:
+
+```{r serfs2, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+serfsSummary %>% filter(n>500)
+```
+
+* Note that data is from 1990-2016
+
+
+## SEAMAP coastal trawl survey
+
+* "Contents of each trawl sorted to species, and total biomass and number of individuals
+recorded for all species of finfish, elasmobranchs, decapod and stomatopod crustaceans, and cephalopods"
+* Length data collected for "priority species" including summer flounder, menhaden, king mackerel, Spanish mackerel, butterfish, all sharks and rays, penaeid shrimp and blue crab (these inverts also had some reproductive measurements)
+
+```{r seamap, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+seamapRaw <- read.delim(here::here("survey-data","seamap_trawl_survey_abundance_biomass_03_28_2020_raw.txt"), sep=",")
+
+seamapTidy <- seamapRaw %>% 
+  rename_all(tolower) %>% 
+  mutate_all(tolower) %>% # so dataframe isn't screaming at me
+  mutate_all(funs(str_replace(., "=", ""))) %>% # raw data has random equals signs everywhere
+  # mutate_all(na_if, "not applicable") %>% 
+  select_if(~!all(is.na(.))) %>%  # remove columns that just have NAs in them 
+  distinct() %>% 
+  mutate(date = mdy(date),
+         month = month(date),
+         year = year(date))
+
+seamapSummary <- seamapTidy %>% 
+  filter(speciesscientificname %in% sppOfInterest$sppLatin) %>% 
+  group_by(speciesscientificname, speciescommonname) %>% 
+  summarise(n=n()) %>% 
+  ungroup() %>% 
+  arrange(-n) 
+
+seamapSummary
+
+min(seamapTidy$year, na.rm=TRUE)
+max(seamapTidy$year, na.rm=TRUE)
+```
+
+## NEAMAP coastal trawl survey
+
+NOTE: This data has not been officially requested for use in this project. 
+
+```{r neamap, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+load(here("survey-data","hauls_catch_Dec2017.RData"))
+
+neamapTidy <- dat %>% 
+  left_join(hauls, by="haulid") %>% 
+  select(haulid, sppocean, lat, lon, year, region) %>% 
+  filter(region=="VIMS_NEAMAP") %>% 
+  mutate(spp = str_replace(sppocean, "_Atl","")) %>% 
+  select(-sppocean, -region) %>% 
+  distinct()
+
+neamapSummary <- neamapTidy %>% 
+  filter(spp %in% sppOfInterest$sppLatin) %>% 
+  group_by(spp) %>% 
+  summarise(n=n()) %>% 
+  ungroup() %>% 
+  arrange(-n) 
+neamapSummary
+```
+
+
+## NOAA Trawl Surveys
+
+### NEFSC
+
+The mid-Atlantic region is primarily covered by the Northeast Fisheries Science Center trawl survey, which goes as far south as Cape Hatteras (or a little further in some years). The mid-Atlantic region begins a little further south than that:
+
+![](/Users/afh/github/SDM-convergence/images/MAFMC_map.jpg)
+
+* Downloaded on March 28, 2020 from OceanAdapt, and re-ran `compile.R` with `HQ_DATA_ONLY=FALSE` and `TRUE` for all the data write-out questions (it will generate a bunch of errors until you go through and fix all the file paths to point to where you stored OceanAdapt) 
+
+```{r nefsc, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+load(here("survey-data/mpinsky-OceanAdapt-9815545/data_clean","all-regions-full.Rdata"))
+
+nefscTidy <- dat %>% 
+  filter(region %in% c('Northeast US Spring','Northeast US Fall')) %>% 
+  mutate(spp = tolower(spp)) %>% 
+  filter(spp %in% sppOfInterest$sppLatin) 
+
+nefscSummary <- nefscTidy %>% 
+  group_by(spp) %>% 
+  summarise(n=n()) %>% 
+  ungroup() %>% 
+  left_join(sppOfInterest, by=c('spp'='sppLatin')) %>% 
+  arrange(-n)
+
+nefscSummary
+```
+
+* Great data on shortfin squid, fluke, and spiny dogfish. Not so much the rest of the species
+
+### SEFSC
+
+```{r sefsc, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+sefscTidy <- dat %>% 
+  filter(region %in% c('Southeast US Spring','Southeast US Summer','Southeast US Fall')) %>% 
+  mutate(spp = tolower(spp)) %>% 
+  filter(spp %in% sppOfInterest$sppLatin)
+
+sefscSummary <- sefscTidy %>% 
+  group_by(spp) %>% 
+  summarise(n=n()) %>% 
+  ungroup() %>% 
+  left_join(sppOfInterest, by=c('spp'='sppLatin')) %>% 
+  arrange(-n)
+
+sefscSummary 
+```
+
+# Summary 
+
+```{r obs summary, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+nefscPrep <- nefscSummary %>%
+  mutate(survey="NEFSC_trawl") %>% 
+  select(-sppCommon)
+
+sefscPrep <- sefscSummary %>%
+  mutate(survey="SEFSC_trawl") %>% 
+  select(-sppCommon)
+
+serfsPrep <- serfsSummary %>% 
+  select(-speciescommonname) %>% 
+  rename("spp"=speciesscientificname) %>% 
+  mutate(survey="SERFS_fixed_gear")
+
+seamapPrep <- seamapSummary %>% 
+  select(-speciescommonname) %>% 
+  rename("spp"=speciesscientificname) %>% 
+  mutate(survey="SEAMAP_trawl")
+
+neamapPrep <- neamapSummary %>% 
+  mutate(survey="NEAMAP_trawl")
+
+summaryDat <- rbind(nefscPrep, sefscPrep, serfsPrep, seamapPrep, neamapPrep) %>%
+  arrange(spp) %>% 
+  left_join(sppOfInterest, by=c('spp'='sppLatin'))
+summaryDat
+
+topSpp <- summaryDat %>% 
+  group_by(spp) %>% 
+  mutate(Nsum = sum(n)) %>% 
+  ungroup() %>% 
+  select(spp, sppCommon, Nsum) %>% 
+  distinct() %>% 
+  arrange(-Nsum) %>% 
+  filter(Nsum>1000)
+topSpp
+```
+
+# Range maps for all species 
+
+Bind all survey data together 
+
+```{r maps prep, eval=TRUE, results="hide", echo=FALSE, message=FALSE, warning=FALSE}
+serfsJoin <- serfsTidy %>% 
+  select(latitudestart, longitudestart, speciesscientificname, year, eventname) %>% 
+  distinct() %>% 
+  rename("lat"=latitudestart,
+         "lon"=longitudestart,
+         "spp"=speciesscientificname) %>% 
+  filter(spp %in% sppOfInterest$sppLatin) %>% 
+  mutate(survey="serfs",
+         lat=as.numeric(lat),
+         lon=as.numeric(lon))
+
+seamapJoin <- seamapTidy %>% 
+  select(latitudestart, longitudestart, speciesscientificname, year, eventname) %>% 
+  distinct() %>% 
+  rename("lat"=latitudestart,
+         "lon"=longitudestart,
+         "spp"=speciesscientificname) %>% 
+  filter(spp %in% sppOfInterest$sppLatin) %>% 
+  mutate(survey="seamap",
+         lat=as.numeric(lat),
+         lon=as.numeric(lon))
+
+nefscJoin <- nefscTidy %>% 
+  select(lat, lon, spp, year, haulid) %>% 
+  rename("eventname"=haulid) %>% 
+  mutate(survey="nefsc")
+
+sefscJoin <- sefscTidy %>% 
+  select(lat, lon, spp, year, haulid) %>% 
+  rename("eventname"=haulid) %>% 
+  mutate(survey="sefsc")
+
+surveydf <- rbind(serfsJoin, seamapJoin, nefscJoin, sefscJoin) %>% 
+  left_join(sppOfInterest, by=c("spp"="sppLatin"))
+```
+
+Get range maps 
+
+```{r obs maps, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+library(rnaturalearth)
+library(sf)
+library(RColorBrewer)
+
+lonrange <- c(-83, -63)
+latrange <- c(25, 48)
+
+usoutline <- rnaturalearth::ne_states("united states of america", returnclass = "sf") %>% 
+  st_sf()
+
+for(i in sppOfInterest$sppCommon) {
+  
+  annotatedf <- surveydf %>% 
+    filter(sppCommon==i) %>% 
+    group_by(year) %>% 
+    mutate(obsCount = length(eventname)) %>% 
+    ungroup() %>% 
+    select(year, obsCount) %>% 
+    distinct()
+  
+  if(nrow(annotatedf)>0) {
+    rangemap <- surveydf %>% 
+      filter(sppCommon==i) %>% 
+      ggplot() + 
+      geom_sf(data=usoutline, color="#999999") +
+      geom_point(aes(x=lon, y=lat, color=survey), size=0.4) +
+      scale_color_brewer(type="qual", palette="Set2") +
+      scale_x_continuous(limits = lonrange, expand = c(0, 0)) +
+      scale_y_continuous(limits = latrange, expand = c(0, 0)) +
+      theme_bw() +
+      theme(legend.position = "bottom",
+            text=element_text(family="sans",size=12,color="black"),
+            legend.text = element_text(size=12),
+            axis.text=element_text(family="sans",size=8,color="black"), 
+            axis.title=element_blank(),
+            axis.text.x=element_text(angle=45),
+            plot.margin=margin(t = 5, r = 0, b = 15, l = 5, unit = "pt")) +
+      facet_wrap(~year) +
+      geom_text(
+        data=annotatedf, 
+        mapping = aes(x = -79, y = 46, label = obsCount,)
+      )
+    NULL
+    print(i)
+    rangemap
+    ggsave(rangemap, filename=here("images",paste0(i,"_range_map.png")), width=8, height=10, scale=1.2, dpi=160)
+  }
+}
+```
+
+# Comparing size structure
+
+We've narrowed it down to three South Atlantic species that might shift into the mid-Atlantic: They are all data-rich, but which have the best representation of all size classes in the trawl data?
+
+Because digging length info out of the NOAA trawl surveys is a pain, let's start with SEAMAP/SERFS. Downloaded datasets at length frequency resolution on April 10, 2020 with all options for gear, species, lat/lon, etc. selected (except "states" deselected for SEAMAP). 
+
+```{r fishbase, eval=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+fbSpp <- c('Scomberomorus maculatus','Scomberomorus cavalla','Balistes capriscus')
+list_fields("Maturity")
+fbOut <- stocks(fbSpp, fields=c("Maturity","MatSizes","Reproduction","LengthRelations"))
+
+# since fishbase isn't working ... 
+
+
+serfsLengthRaw <- read.delim(here::here("survey-data","southeast_reef_fish_survey_length_frequency_04_10_2020_raw.txt"), sep=",")
+
+serfsLengthTidy <- serfsLengthRaw %>%
+  rename_all(tolower) %>% 
+  mutate_all(tolower) %>% # so dataframe isn't screaming at me
+  mutate_all(funs(str_replace(., "=", ""))) %>% # raw data has random equals signs everywhere
+  mutate_all(na_if, "not applicable") %>% 
+  select_if(~!all(is.na(.))) %>%  # remove columns that just have NAs in them 
+  distinct() %>% 
+  mutate(date = mdy(date),
+         month = month(date),
+         year = year(date)) %>% 
+  select(-sdo, -bdo)
+
+seamapLengthRaw <- read.delim(here::here("survey-data","seamap_trawl_survey_length_frequency_04_10_2020_raw.txt"), sep=",")
+
+seamapLengthTidy <- seamapLengthRaw %>% 
+  rename_all(tolower) %>% 
+  mutate_all(tolower) %>% # so dataframe isn't screaming at me
+  mutate_all(funs(str_replace(., "=", ""))) %>% # raw data has random equals signs everywhere
+  # mutate_all(na_if, "not applicable") %>% 
+  select_if(~!all(is.na(.))) %>%  # remove columns that just have NAs in them 
+  distinct() %>% 
+  mutate(date = mdy(date),
+         month = month(date),
+         year = year(date)) %>% 
+  select(-location, -region, -depthzone, -accspgridcode)
+
+lengthdf <- bind_rows(serfsLengthTidy, seamapLengthTidy) %>% 
+  rename("sppLatin"=speciesscientificname,
+         "sppCommon"=speciescommonname)
+
+Lm <- c(43, 63.3, 16.3)
+fbdat <- cbind(fbSpp, Lm) %>% 
+  as_tibble() %>% 
+  mutate_all(tolower) %>% 
+  mutate(Lm = as.numeric(Lm))
+
+Ldat <- sppOfInterest %>% 
+  left_join(fbdat, by=c("sppLatin"="fbSpp")) %>% 
+  filter(!is.na(Lm))
+
+histLength <- lengthdf %>% 
+  inner_join(Ldat) %>% 
+  mutate(length = as.numeric(length),
+         totalnumber = as.numeric(totalnumber)) %>% 
+  filter(!is.na(length), !is.na(totalnumber)) %>% 
+  group_by(sppLatin, sppCommon, length) %>% 
+  mutate(sumtotalnumber = sum(totalnumber)) %>% 
+  ungroup() %>% 
+  select(sppLatin, sppCommon, length, sumtotalnumber) %>% 
+  distinct() %>% 
+  ggplot() + 
+  geom_bar(aes(x=length, weights=sumtotalnumber), stat="count") + 
+  geom_vline(data=Ldat, aes(xintercept=Lm), color="red", linetype="dashed") +
+  facet_wrap(~sppCommon)
+histLength
+ggsave(histLength, filename=here("images","sa_spp_length_freq.png"), width=8,height=5,dpi=160)
+```
