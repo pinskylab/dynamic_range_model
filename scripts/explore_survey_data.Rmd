@@ -315,7 +315,7 @@ surveydf <- rbind(serfsJoin, seamapJoin, nefscJoin, sefscJoin) %>%
 
 Get range maps 
 
-```{r obs maps, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+```{r obs maps, eval=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
 library(rnaturalearth)
 library(sf)
 library(RColorBrewer)
@@ -372,13 +372,20 @@ We've narrowed it down to three South Atlantic species that might shift into the
 
 Because digging length info out of the NOAA trawl surveys is a pain, let's start with SEAMAP/SERFS. Downloaded datasets at length frequency resolution on April 10, 2020 with all options for gear, species, lat/lon, etc. selected (except "states" deselected for SEAMAP). 
 
+After plotting length frequency with length at maturity reference values from FishBase, it looks like all of the gray triggerfish caught in the survey are adults, and all of both mackerel species are juveniles. I wanted to check whether these length at maturity values were accurate, so I dug into the SEDAR reports for each species. 
+
+For gray triggerfish, in SEDAR 41, the fork length where 50% of females are mature was 177mm, and 180mm for males. Table 2.12 included a formula for conversion: TL = -18.27 + 1.21*FL. 
+
+For Spanish mackerel, SEDAR 28 reported that reproductive data was fairly consistent with SEDAR 17, and reported a range of fork lengths within which 50% of each sex is mature: 301-325mm for females, 201-225 for males, based on survey size classes. They had some notes on why these are so different that I didn't totally understand. They reported this formula for conversion from fork length to total length: $FL = -11.8218 + 0.8816*TL$, which I converted to: $TL = 13.4095 + 1.1343* FL$. Below I just used the midpoint of each range for each sex. 
+
+For King mackerel, all of the SEDAR reports--5, 16, and 38--trace back to a paper in 1986 (Finucane *et al.* in Fishery Bulletin). This reports only female 50% length at maturity, split up by area; in "area IV" (the South Atlantic), it's 650-699 mm. SEDAR 38 has this conversion formula in Table 2.14.9, in cm: $FL = -4.28 + 0.963*TL$, which I converted to $TL = 4.444 + 1.0384*FL$. Below I again used the midpoint of this range. 
+
 ```{r fishbase, eval=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
 fbSpp <- c('Scomberomorus maculatus','Scomberomorus cavalla','Balistes capriscus')
-list_fields("Maturity")
-fbOut <- stocks(fbSpp, fields=c("Maturity","MatSizes","Reproduction","LengthRelations"))
+# list_fields("Maturity")
+# fbOut <- stocks(fbSpp, fields=c("Maturity","MatSizes","Reproduction","LengthRelations"))
 
 # since fishbase isn't working ... 
-
 
 serfsLengthRaw <- read.delim(here::here("survey-data","southeast_reef_fish_survey_length_frequency_04_10_2020_raw.txt"), sep=",")
 
@@ -389,41 +396,11 @@ serfsLengthTidy <- serfsLengthRaw %>%
   mutate_all(na_if, "not applicable") %>% 
   select_if(~!all(is.na(.))) %>%  # remove columns that just have NAs in them 
   distinct() %>% 
-  mutate(date = mdy(date),
-         month = month(date),
-         year = year(date)) %>% 
-  select(-sdo, -bdo)
-
-seamapLengthRaw <- read.delim(here::here("survey-data","seamap_trawl_survey_length_frequency_04_10_2020_raw.txt"), sep=",")
-
-seamapLengthTidy <- seamapLengthRaw %>% 
-  rename_all(tolower) %>% 
-  mutate_all(tolower) %>% # so dataframe isn't screaming at me
-  mutate_all(funs(str_replace(., "=", ""))) %>% # raw data has random equals signs everywhere
-  # mutate_all(na_if, "not applicable") %>% 
-  select_if(~!all(is.na(.))) %>%  # remove columns that just have NAs in them 
+  mutate(date = mdy(date)) %>% 
+  select(eventname, date, speciesscientificname, speciescommonname, length, numbermeasure, totalnumber, latitudestart, longitudestart) %>% 
   distinct() %>% 
-  mutate(date = mdy(date),
-         month = month(date),
-         year = year(date)) %>% 
-  select(-location, -region, -depthzone, -accspgridcode)
-
-lengthdf <- bind_rows(serfsLengthTidy, seamapLengthTidy) %>% 
-  rename("sppLatin"=speciesscientificname,
-         "sppCommon"=speciescommonname)
-
-Lm <- c(43, 63.3, 16.3)
-fbdat <- cbind(fbSpp, Lm) %>% 
-  as_tibble() %>% 
-  mutate_all(tolower) %>% 
-  mutate(Lm = as.numeric(Lm))
-
-Ldat <- sppOfInterest %>% 
-  left_join(fbdat, by=c("sppLatin"="fbSpp")) %>% 
-  filter(!is.na(Lm))
-
-histLength <- lengthdf %>% 
-  inner_join(Ldat) %>% 
+  rename("sppCommon"=speciescommonname,
+         "sppLatin"=speciesscientificname) %>% 
   mutate(length = as.numeric(length),
          totalnumber = as.numeric(totalnumber)) %>% 
   filter(!is.na(length), !is.na(totalnumber)) %>% 
@@ -432,9 +409,86 @@ histLength <- lengthdf %>%
   ungroup() %>% 
   select(sppLatin, sppCommon, length, sumtotalnumber) %>% 
   distinct() %>% 
+  filter(sppLatin %in% sppOfInterest$sppLatin)
+
+seamapLengthRaw <- read.delim(here::here("survey-data","seamap_trawl_survey_length_frequency_04_10_2020_raw.txt"), sep=",")
+
+seamapLengthTidy <- seamapLengthRaw %>%
+  rename_all(tolower) %>% 
+  mutate_all(tolower) %>% # so dataframe isn't screaming at me
+  mutate_all(funs(str_replace(., "=", ""))) %>% # raw data has random equals signs everywhere
+  mutate_all(na_if, "not applicable") %>% 
+  select_if(~!all(is.na(.))) %>%  # remove columns that just have NAs in them 
+  distinct() %>% 
+  mutate(date = mdy(date)) %>% 
+  select(eventname, date, speciesscientificname, speciescommonname, length, numbermeasure, totalnumber, latitudestart, longitudestart) %>% 
+  distinct() %>% 
+  rename("sppCommon"=speciescommonname,
+         "sppLatin"=speciesscientificname) %>% 
+  mutate(length = as.numeric(length),
+         totalnumber = as.numeric(totalnumber)) %>% 
+  filter(!is.na(length), !is.na(totalnumber)) %>% 
+  group_by(sppLatin, sppCommon, length) %>% 
+  mutate(sumtotalnumber = sum(totalnumber)) %>% 
+  ungroup() %>% 
+  select(sppLatin, sppCommon, length, sumtotalnumber) %>% 
+  distinct() %>% 
+  filter(sppLatin %in% sppOfInterest$sppLatin)
+
+neusLengthRaw <- readRDS(here("processed-data","raw_neus_trawl.rds"))
+
+neusLengthTidy <- neusLengthRaw %>% 
+  rename_all(tolower) %>% 
+  select(lat, lon, sciname, length, numlen, cruise6, station, stratum, tow, year, est_towdate) %>% 
+  distinct() %>% 
+  rename("sppLatin"=sciname) %>% 
+  filter(!is.na(length), !is.na(numlen)) %>% 
+  group_by(sppLatin, length) %>% 
+  mutate(sumtotalnumber = sum(numlen)) %>% 
+  ungroup() %>% 
+  select(sppLatin, length, sumtotalnumber) %>% 
+  distinct() %>% 
+  mutate(sppLatin = tolower(sppLatin)) %>% 
+  inner_join(sppOfInterest, by="sppLatin")
+
+# seusLengthRaw <- readRDS(here("processed-data","raw_seus_trawl.rds"))
+# doesn't appear to have length data in it 
+  
+lengthdf <- bind_rows(serfsLengthTidy, seamapLengthTidy, neusLengthTidy) %>% 
+  group_by(sppLatin, sppCommon, length) %>% 
+  mutate(total = sum(sumtotalnumber)) %>% 
+  select(sppCommon, sppLatin, length, total) %>% 
+  distinct()
+
+# using SEDAR reported Lm values, and converting from FL to TL *in millimeters*, then converting to cm for the first two (king mackerel already in cm)
+gray_t_lm_TL_female <- (-18.27+1.21*177)/10
+gray_t_lm_TL_male <- (-18.27+1.21*180)/10
+spanish_m_lm_TL_female <- (13.4095+1.1343*313)/10
+spanish_m_lm_TL_male <- (13.4095+1.1343*213)/10
+king_m_lm_TL_female <- 4.444+1.0384*67.45
+
+Lm_fb_TL <- c(43, 63.3, 16.3) # full length length at maturity from FishBase; order Spanish, King, gray 
+Lm_sedar_TL_female <- c(spanish_m_lm_TL_female, king_m_lm_TL_female, gray_t_lm_TL_female)
+Lm_sedar_TL_male <- c(spanish_m_lm_TL_male, NA, gray_t_lm_TL_male)
+
+Lmdat <- cbind(fbSpp, Lm_fb_TL, Lm_sedar_TL_female, Lm_sedar_TL_male) %>% 
+  as_tibble() %>% 
+  mutate(fbSpp = tolower(fbSpp)) %>% 
+  mutate(Lm_fb_TL = as.numeric(Lm_fb_TL), 
+         Lm_sedar_TL_female = as.numeric(Lm_sedar_TL_female),
+         Lm_sedar_TL_male = as.numeric(Lm_sedar_TL_male))
+
+Ldat <- sppOfInterest %>% 
+  left_join(Lmdat, by=c("sppLatin"="fbSpp")) %>% 
+  filter(!is.na(Lm_fb_TL))
+
+histLength <- lengthdf %>% 
+  inner_join(Ldat) %>% # keep only species we want to plot length frequency for 
   ggplot() + 
-  geom_bar(aes(x=length, weights=sumtotalnumber), stat="count") + 
-  geom_vline(data=Ldat, aes(xintercept=Lm), color="red", linetype="dashed") +
+  geom_bar(aes(x=length, weights=total), stat="count") + 
+  geom_vline(data=Ldat %>% select(sppCommon, Lm_sedar_TL_female), aes(xintercept=Lm_sedar_TL_female), color="magenta", linetype="dashed") +
+    geom_vline(data=Ldat %>% select(sppCommon, Lm_sedar_TL_male), aes(xintercept=Lm_sedar_TL_male), color="blue", linetype="dashed") +
+    geom_vline(data=Ldat %>% select(sppCommon, Lm_fb_TL), aes(xintercept=Lm_fb_TL), color="green", linetype="dashed") +
   facet_wrap(~sppCommon)
 histLength
 ggsave(histLength, filename=here("images","sa_spp_length_freq.png"), width=8,height=5,dpi=160)
