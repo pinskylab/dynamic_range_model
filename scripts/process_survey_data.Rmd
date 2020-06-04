@@ -53,12 +53,12 @@ load(paste0(OApath, "data_raw/neus_SVSPP.RData"))
 neus_len <- survdat %>% 
   # create a haulid for joining with dat.exploded
   mutate(haulid = paste(formatC(CRUISE6, width=6, flag=0), formatC(STATION, width=3, flag=0), formatC(STRATUM, width=4, flag=0), sep='-')) %>% 
-  select(haulid, SVSPP, LENGTH, NUMLEN) %>% 
+  select(haulid, SVSPP, LENGTH, NUMLEN, BOTTEMP) %>% 
   filter(haulid %in% dat_exploded_filter$haulid) %>% # pare down to hauls of interest 
   left_join(spp, by="SVSPP") %>% # get species names from species codes
   mutate(spp = str_to_sentence(SCINAME)) %>% # change to format of sppOfInt
   filter(spp %in% sppOfInt) %>%
-  select(spp, haulid, LENGTH, NUMLEN) %>%
+  select(spp, haulid, LENGTH, NUMLEN, BOTTEMP) %>%
   filter(!is.na(LENGTH))
 ```
 
@@ -116,7 +116,7 @@ seus_len <- seus_specimens %>%
 
 I'm not sure how to use the Southeast data because (unlike Northeast) length measurements don't appear to have been recorded on *every* haul, so we won't always have associated length data for positive catches. 
 
-# Summarize length data into length classes
+# Summarize length data into length classes CURRENTLY NEUS ONLY
 
 Note that the chunk below is written for one species only (spiny dogfish)--will need to be updated in the future when more species are added in. 
 
@@ -152,8 +152,5 @@ write_csv(dogfish_len_zeros, here::here("processed-data", "dogfish_prepped_data.
 
 zip(zipfile = here::here("processed-data", "dogfish_prepped_data.zip"),
     files = here::here("processed-data", "dogfish_prepped_data.csv"))
-
-file.remove(here::here("processed-data", "dogfish_prepped_data.csv"))
-
 ```
 
