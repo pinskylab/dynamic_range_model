@@ -39,7 +39,7 @@ load(paste0(OApath,"data_clean/dat_exploded.RData"))
 dat_exploded_filter <- dat.exploded %>%
   filter(spp %in% sppOfInt,
          region %in% regOfInt
-  )
+  ) 
 ```
 
 # Get length-frequency data from individual surveys
@@ -53,13 +53,23 @@ load(paste0(OApath, "data_raw/neus_SVSPP.RData"))
 neus_len <- survdat %>% 
   # create a haulid for joining with dat.exploded
   mutate(haulid = paste(formatC(CRUISE6, width=6, flag=0), formatC(STATION, width=3, flag=0), formatC(STRATUM, width=4, flag=0), sep='-')) %>% 
-  select(haulid, SVSPP, LENGTH, NUMLEN, BOTTEMP) %>% 
+  select(haulid, SVSPP, LENGTH, NUMLEN) %>% 
   filter(haulid %in% dat_exploded_filter$haulid) %>% # pare down to hauls of interest 
   left_join(spp, by="SVSPP") %>% # get species names from species codes
   mutate(spp = str_to_sentence(SCINAME)) %>% # change to format of sppOfInt
   filter(spp %in% sppOfInt) %>%
-  select(spp, haulid, LENGTH, NUMLEN, BOTTEMP) %>%
+  select(spp, haulid, LENGTH, NUMLEN) %>%
   filter(!is.na(LENGTH))
+
+# creating a separate bottom temperature dataframe so it can be joined at the end after rdoing all the length class sorting
+btemp <- survdat %>% 
+  # create a haulid for joining with dat.exploded
+  mutate(haulid = paste(formatC(CRUISE6, width=6, flag=0), formatC(STATION, width=3, flag=0), formatC(STRATUM, width=4, flag=0), sep='-')) %>% 
+  select(haulid, BOTTEMP) %>% 
+  distinct() %>%
+  rename("btemp"=BOTTEMP)
+  
+
 ```
 
 ## Scotian Shelf
@@ -139,6 +149,8 @@ dogfish_len_zeros <- expand_grid(haulid=unique(dat_exploded_filter$haulid),  len
                                  spp="Squalus acanthias") %>% # get all possible combinations of haulid and length class 
   left_join(dogfish_neus_len_agg, by=c("spp","haulid","lengthclass")) %>% # add length counts 
   left_join(dat_exploded_filter, by=c("spp","haulid")) %>% # add haul data 
+  left_join(btemp, by="haulid") %>%
+  select(-wtcpue) %>% # not accurate after all the joins/expansions
   mutate(numlengthclass = replace_na(numlengthclass, 0)) # replace NAs with true zeroes
 ```
 
