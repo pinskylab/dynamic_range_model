@@ -136,8 +136,8 @@ dogfish_neus_len <- neus_len %>% filter(spp=="Squalus acanthias") # eventually n
 dogfish_lm_F <- 75 #cm; see SAW 43 p17
 dogfish_lm_M <- 60 
 
-dogfish_lm <- mean(c(dogfish_lm_M, dogfish_lm_F))
-dogfish_ljuv <- min(dogfish_neus_len$LENGTH) + (dogfish_lm - min(dogfish_neus_len$LENGTH))/2 # halfway between min size caught and Lm
+dogfish_lm <- mean(c(dogfish_lm_M, dogfish_lm_F)) # 67.5
+dogfish_ljuv <- min(dogfish_neus_len$LENGTH) + (dogfish_lm - min(dogfish_neus_len$LENGTH))/2 # halfway between min size caught and Lm; 39.75
 
 dogfish_neus_len_agg <- dogfish_neus_len %>%
   mutate(lengthclass = ifelse(LENGTH <= dogfish_ljuv, "smalljuv",
