@@ -1,0 +1,112 @@
+---
+title: "Spiny dogfish dynamic range model"
+author: "Alexa Fredston"
+date: "8/19/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+Right now the simulations for spiny dogfish are being generated in Python. Let's load in the output and explore it. 
+
+```{r packages, warning=FALSE, message=FALSE, echo=FALSE, results="hide"}
+library(tidyverse)
+library(here)
+```
+
+```{r prep, warning=FALSE, message=FALSE, echo=FALSE, results="hide"}
+dog_raw <- read_csv(here("processed-data","dogfish_prepped_data.csv"))
+
+dog_validate <- dog_raw %>%
+  mutate(latround = round(lat)) %>% 
+  group_by(lengthclass, year, latround) %>% 
+  summarise(
+            abundance = sum(numlengthclass),
+            ) %>% 
+  mutate(source = "data")
+
+minlat_model <- min(dog_raw$lat) %>% round()
+
+dog_out <- read_csv(here("python","spiny_dogfish_out.csv")) %>%
+  select(-X1) %>% 
+  rename('year'=Year,
+         'lengthclass'=Stage,
+         'abundance'=Abundance,
+         'latround'=Latitude) %>%
+  mutate(source = "simulation")
+
+# not actually using dog_in right now 
+dog_in <- read_csv(here("python","spiny_dogfish_training_data.csv")) %>%
+  select(-X1) %>%
+  separate(patch_id, into=c("lengthclass","latbandcode"), sep="_patch") %>%
+  mutate(latbandcode = as.numeric(latbandcode),
+         latround = latbandcode+minlat_model-1) %>%
+  mutate(source = "training",
+         lengthclass = recode(lengthclass, 
+                              "A"="adult",
+                              "Y"="largejuv",
+                              "J"="smalljuv"))
+```
+
+First, here are the model's parameter estimates: 
+```{r params, warning=FALSE, echo=FALSE, message=FALSE}
+params_raw <- read_delim(here("python","parameter_estimates.csv"), delim=",",col_names=c("parameter","estimate"))
+library(knitr)
+kable(params_raw)
+```
+
+Let's look at the real and simulated abundances (number of individuals) for the three size classes across all patches and years. 
+
+```{r plot all, fig.height=7, message=FALSE, echo=FALSE, warning=FALSE}
+doggg_all <- dog_out %>% 
+  rbind(dog_validate %>% select(year, lengthclass, latround, abundance, source)) %>% 
+  ggplot() + 
+  geom_line(aes(x=year, y=abundance, color=lengthclass, linetype=source)) + 
+  scale_color_brewer(type="qual") +
+  geom_vline(aes(xintercept=2008)) +
+  facet_wrap(~latround, ncol=4) +
+  scale_x_continuous(limits=c(1963, 2018), breaks=seq(1963, 2018, 5)) +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, hjust=1))
+
+doggg_all
+```
+
+Most patches have basically no individuals at any time, possibly because they fall beyond the survey's regularly sampled extent. To get a better handle on the model performance, let's zoom in on 35N (Cape Hatteras) to 44N (central Maine coast). These latitude bands are defined by simple rounding, so 40 degrees includes everything from 39.51N to 40.49N. 
+
+```{r plot crop, fig.height=7, message=FALSE, echo=FALSE, warning=FALSE}
+doggg_crop <- dog_out %>% 
+  rbind(dog_validate %>% select(year, lengthclass, latround, abundance, source)) %>% 
+  filter(latround>=35, latround<=44) %>%
+  ggplot() + 
+  geom_line(aes(x=year, y=abundance, color=lengthclass, linetype=source)) + 
+  scale_color_brewer(type="qual") +
+  geom_vline(aes(xintercept=2008)) +
+  facet_wrap(~latround, ncol=3) +
+  scale_x_continuous(limits=c(1963, 2018), breaks=seq(1963, 2018, 5)) +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, hjust=1))
+
+doggg_crop
+```
+
+And because the simulations are hard to see given the big peaks in abundance for the last 10 years, let's zoom in on just those years and ignore some of the peaks: 
+
+
+```{r plot zoom, fig.height=7, message=FALSE, echo=FALSE}
+doggg_zoom <- dog_out %>% 
+  rbind(dog_validate %>% select(year, lengthclass, latround, abundance, source)) %>% 
+  filter(latround>=35, latround<=44) %>%
+  ggplot() + 
+  geom_line(aes(x=year, y=abundance, color=lengthclass, linetype=source)) + 
+  scale_color_brewer(type="qual") +
+  geom_vline(aes(xintercept=2008)) +
+  facet_wrap(~latround, ncol=3) +
+coord_cartesian(xlim=c(2008, 2018), ylim=c(0, 10000)) +
+    theme_bw() +
+  theme(axis.text.x=element_text(angle=45, hjust=1))
+
+doggg_zoom
+```
+
+(Ignore the funky year labels.) 
