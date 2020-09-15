@@ -36,24 +36,39 @@ dog_out <- read_csv(here("python","spiny_dogfish_out.csv")) %>%
   mutate(source = "simulation")
 
 # not actually using dog_in right now 
-dog_in <- read_csv(here("python","spiny_dogfish_training_data.csv")) %>%
-  select(-X1) %>%
-  separate(patch_id, into=c("lengthclass","latbandcode"), sep="_patch") %>%
-  mutate(latbandcode = as.numeric(latbandcode),
-         latround = latbandcode+minlat_model-1) %>%
-  mutate(source = "training",
-         lengthclass = recode(lengthclass, 
-                              "A"="adult",
-                              "Y"="largejuv",
-                              "J"="smalljuv"))
+# dog_in <- read_csv(here("python","spiny_dogfish_training_data.csv")) %>%
+#   select(-X1) %>%
+#   separate(patch_id, into=c("lengthclass","latbandcode"), sep="_patch") %>%
+#   mutate(latbandcode = as.numeric(latbandcode),
+#          latround = latbandcode+minlat_model-1) %>%
+#   mutate(source = "training",
+#          lengthclass = recode(lengthclass, 
+#                               "A"="adult",
+#                               "Y"="largejuv",
+#                               "J"="smalljuv"))
 ```
 
-First, here are the model's parameter estimates: 
+## Parameter estimates 
+
 ```{r params, warning=FALSE, echo=FALSE, message=FALSE}
 params_raw <- read_delim(here("python","parameter_estimates.csv"), delim=",",col_names=c("parameter","estimate"))
 library(knitr)
 kable(params_raw)
 ```
+
+How do these parameters compare to what is known about spiny dogfish mortality? 
+
+### Length
+
+$L_J$ and $L_Y$ are set by us as values known without error. $L_Y$ is the mean length at maturity between females and males of the species (in cm). $L_J$ is the break point between juveniles and young adults; we defined this as halfway between the size at maturity, $L_Y$, and the minimum length caught in the survey (not reported in this parameter table but we can extrapolate that it was 12 cm). Our value of 39.75cm reconciles well with SAW 43 (p33), which states that "Dogfish less than 36 cm represent individuals less than one year old at the time of the survey and are considered as recruits to the population." I'm not sure how to interpret the estimated $L_0$; I think it is mostly a theoretical value in Von Bertalanffy growth, so this very small value seems fine. $L_inf$ for females in SAW 43 was reported to be 105 cm, slightly smaller than what our model estimated. 
+
+### Mortality
+
+Mortality in fisheries is usually decomposed into (at least) two proportions of adults that die every year: $M$, natural mortality, and $F$, fishing mortality. The sum of these may be denoted $Z$ and is likely most comparable to our estimated $m_A$ because we did not attempt to disentangle sources of mortality. While actual values of $F$ have varied markedly during the fishery's history--up to values of 0.6 (SAW 43 Figure B7.1)--the target value is 0.08 and the threshold value is 0.11 (SAW 43, p34). SAW 43 used estimates for $M$ ranging from 0.06 to 0.092. Thus, assuming the units are the same (a dimensionless proportion of total biomass--although perhaps our model used proportion of individuals?) our estimate for $m_A$ may be far too low. 
+
+I'm not sure where to look for empirical estimates of $m_Y$ or $m_J$. 
+
+## Simulated abundance
 
 Let's look at the real and simulated abundances (number of individuals) for the three size classes across all patches and years. 
 
@@ -110,3 +125,7 @@ doggg_zoom
 ```
 
 (Ignore the funky year labels.) 
+
+### Absolute biomass 
+
+Compare what the model says about total abundance to the stock assessment
