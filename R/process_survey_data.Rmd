@@ -32,6 +32,7 @@ regOfInt <- c("Northeast US Spring", "Northeast US Fall", "Southeast US Spring",
 
 ```
 
+
 # Get zero-inflated data from OceanAdapt
 ```{r dat_exploded, eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
 load(paste0(OApath,"data_clean/dat_exploded.RData"))
@@ -57,7 +58,7 @@ neus_len <- survdat %>%
   filter(haulid %in% dat_exploded_filter$haulid) %>% # pare down to hauls of interest 
   left_join(spp, by="SVSPP") %>% # get species names from species codes
   mutate(spp = str_to_sentence(SCINAME)) %>% # change to format of sppOfInt
-  filter(spp %in% sppOfInt) %>%
+ # filter(spp %in% sppOfInt) %>%
   select(spp, haulid, LENGTH, NUMLEN) %>%
   filter(!is.na(LENGTH))
 
@@ -154,6 +155,54 @@ dogfish_len_zeros <- expand_grid(haulid=unique(dat_exploded_filter$haulid),  len
   mutate(numlengthclass = replace_na(numlengthclass, 0)) # replace NAs with true zeroes
 ```
 
+```{r summer flounder}
+# exploring summer flounder data dist. for stats class
+
+fluke_neus_len <- neus_len %>% filter(spp=="Paralichthys dentatus")
+
+fluke_lm <- 28 # FOR EXPLORATORY PURPOSES ONLY! FROM FISHBASE--REVISIT THIS
+fluke_ljuv <- min(fluke_neus_len$LENGTH) + (fluke_lm - min(fluke_neus_len$LENGTH))/2
+
+dat_exploded_fluke <- dat.exploded %>%
+  filter(spp=="Paralichthys dentatus",
+         region %in% regOfInt
+  ) 
+
+fluke_neus_len_agg <- fluke_neus_len %>%
+  mutate(lengthclass = ifelse(LENGTH <= fluke_ljuv, "smalljuv",
+                              ifelse(LENGTH < fluke_lm, "largejuv", "adult"))) %>% 
+  group_by(haulid, spp, lengthclass) %>% 
+  summarise(numlengthclass = sum(NUMLEN))  
+
+fluke_len_zeros <- expand_grid(haulid=unique(dat_exploded_filter$haulid),  lengthclass=unique(fluke_neus_len_agg$lengthclass),
+                                 spp="Paralichthys dentatus") %>%  
+  left_join(fluke_neus_len_agg, by=c("spp","haulid","lengthclass")) %>% 
+  left_join(dat_exploded_fluke, by=c("spp","haulid")) %>% 
+  left_join(btemp, by="haulid") %>%
+  select(-wtcpue) %>% 
+  mutate(numlengthclass = replace_na(numlengthclass, 0)) 
+
+fluke_len_zeros %>% 
+  filter(year==1975, lat < 41, lat >= 40, lengthclass=="adult") %>% 
+  ggplot() +
+  geom_histogram(aes(x=numlengthclass))
+
+fluke_len_zeros %>% 
+  filter(year==1975, lat < 41, lat >= 40, lengthclass=="adult", numlengthclass>0) %>% 
+  ggplot() +
+  geom_histogram(aes(x=numlengthclass))
+
+fluke_len_zeros %>% 
+  filter(year==2009, lat < 41, lat >= 40, lengthclass=="adult", numlengthclass>0) %>% 
+  ggplot() +
+  geom_histogram(aes(x=numlengthclass))
+
+fluke_len_zeros %>% 
+  filter(year==1999, lat < 41, lat >= 40, lengthclass=="adult", numlengthclass>0) %>% 
+  ggplot() +
+  geom_histogram(aes(x=numlengthclass))
+
+```
 # Write out data
 
 In a format that can be imported into Python

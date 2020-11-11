@@ -1,0 +1,157 @@
+---
+title: "hierarchical_model"
+author: "Alexa Fredston-Hermann"
+date: "10/30/2020"
+output: html_document
+---
+
+Credit to the SESYNCBayes course (materials [here](https://cchecastaldo.github.io/BayesianShortCourse/Syllabus.html), code [here](https://github.com/CCheCastaldo/BayesianShortCourse)) for `rjags` instruction and code. 
+
+
+```{r, eval=TRUE}
+library(rjags)
+library(tidyverse)
+library(here)
+library(MCMCvis)
+library(SESYNCBayes) # for comparing to class notes 
+
+dogfish <- read_csv(here("processed-data","dogfish_prepped_data.csv"))
+
+dogfishTest <- dogfish %>% 
+  filter(lengthclass=="adult") %>% 
+  group_by(year) %>% 
+  summarise(estN = sum(numlengthclass),
+            haulN = length(unique(haulid))) %>% 
+  arrange(year) %>% 
+  mutate(estNlag = lag(estN, n=1)) %>% # create N-1 column for model
+  filter(year > min(year)) 
+
+```
+
+Specify model structure
+
+# Simple time-dependent Ricker growth, one life stage, one level
+
+$$[\mathbf{N}|N_0,r,h]=\prod_tPoisson(N_t|\lambda_t)$$
+
+Where population size is modeled according to Ricker growth with two parameters $r$ and $h$: 
+
+$$N_t = N_{t-1}e^{r-hN_{t-1}}$$
+
+This takes a few seconds to run on my laptop.
+
+``` {r JAGS1, eval = TRUE, include = TRUE, echo = TRUE}
+{
+  sink("JAGS1.R")
+  cat(" 
+model {
+  
+  # priors
+  
+  r ~ dunif(0, 2)
+  h ~ dunif(-0.1, 0.1) 
+  
+  # likelihood
+  
+  for(t in 1:lenT) {
+    
+    lambda[t] <- x[t] * exp(r - h * x[t])  # Ricker growth 
+    y[t] ~ dpois(lambda[t])
+  
+  }
+} 
+
+",fill = TRUE)
+  sink()
+}
+```
+
+``` {r run JAGS1, eval = TRUE, include = TRUE, echo = TRUE}
+# give chains initial values for each parameter (must be in separate lists for jags)
+inits1 = list(
+  list(r = .2, h = 0.006), list(r = .15, h = .001), list(r = .3, h = -.001))
+data1 = list(
+  lenT = nrow(dogfishTest),
+  x = as.double(dogfishTest$estNlag), y = as.double(dogfishTest$estN))
+n.adapt1 = 1000 
+n.update1 = 10000 
+n.iter1 = 10000
+
+# Call to JAGS
+set.seed(1)
+jm1 = jags.model("JAGS1.R", data = data1, inits = inits1, n.chains = length(inits1), n.adapt = n.adapt1)
+update(jm1, n.iter = n.update1)
+zm1 = coda.samples(jm1, variable.names = c("h", "r" , "lambda"), n.iter = n.iter1, n.thin = 1)
+MCMCsummary(zm1)
+MCMCplot(zm1, params = c("h", "r" , "lambda"))
+MCMCtrace(zm1, params = c("h", "r"), pdf = FALSE)
+```
+
+# Simple time-dependent Ricker growth, one stage, one patch, with data model
+
+We keep the same Ricker model: 
+
+$$[\mathbf{N}|N_0,r,h]=\prod_tPoisson(N_t|\lambda_t)$$
+
+Where population size is modeled according to Ricker growth with two parameters $r$ and $h$: 
+
+$$N_t = N_{t-1}e^{r-hN_{t-1}}$$
+
+Now, however, $\mathbf{N}$ is modeled with an observer model, rather than assumed to be known without error. Because biological survey data often contains many absence records, population size is typically modeled as the combined probability of encounter (presence/absence) and abundance (counts or weight). In Pagel and Schurr they use a Bernoulli process for presence $\mathbf{P}$ and a binomial distribution for abundance $\mathbf{A}$, with per-individual detection probabilities $\pi_P$ and $\pi_A$: 
+
+$$p(\mathbf{A, P | N, \pi_A, \pi_P}) = \prod_\Theta Binomial(A_{t}|N_t,\pi_A) \times \prod_\Omega Bernoulli(P_t|\Psi_t)$$ 
+Note that relative to the paper we have simplified these equations by removing spatial structure. 
+
+$\Theta$ and $\Omega$ "denote the subset of sites and years for which abundance and presence-absence data exist, respectively." $\Psi$ is estimated as the probability to observe at least one out of $N$ individuals: $\Psi=1-(1-\pi_P)^N$.
+
+*But below I'm only using the abundance component for simplicity*
+
+``` {r JAGS2, eval = TRUE, include = TRUE, echo = TRUE}
+{
+  sink("JAGS2.R")
+  cat(" 
+model {
+  
+  # priors
+  
+  r ~ dunif(0, 2)
+  h ~ dunif(-0.1, 0.1) 
+  pi.a ~ dunif(0, 1) # per-individual detection probability for the sampling of abundance 
+
+  # likelihood
+  
+  for(t in 1:lenT) {
+  
+    A[t] ~ dbinom(x[t], pi.a) # observer model    # probability = pi.a, size = no. tows at t, x = abundance 
+    lambda[t] <- A[t] * exp(r - h * A[t])  # Ricker growth 
+    y[t] ~ dpois(lambda[t])
+  
+  
+  }
+}
+
+",fill = TRUE)
+  sink()
+}
+```
+
+``` {r run JAGS2, eval = TRUE, include = TRUE, echo = TRUE}
+# give chains initial values for each parameter (must be in separate lists for jags)
+inits2 = list(
+  list(r = .2, h = 0.006, pi.a = 0.9), list(r = .15, h = .001, pi.a=0.2), list(r = .3, h = -.001, pi.a=0.01))
+data2 = list(
+  lenT = nrow(dogfishTest),
+  x = as.double(dogfishTest$estNlag), y = as.double(dogfishTest$estN), haulN = as.double(dogfishTest$haulN))
+n.adapt2 = 1000 
+n.update2 = 10000 
+n.iter2 = 10000
+
+# Call to JAGS
+set.seed(1)
+jm2 = jags.model("JAGS2.R", data = data2, inits = inits2, n.chains = length(inits2), n.adapt = n.adapt2)
+update(jm2, n.iter = n.update2)
+zm2 = coda.samples(jm2, variable.names = c("h", "r", "pi.a", "lambda"), n.iter = n.iter1, n.thin = 1)
+MCMCsummary(zm2)
+MCMCplot(zm2, params = c("h", "r", "pi.a", "lambda"))
+MCMCtrace(zm2, params = c("h", "r", "pi.a"), pdf = FALSE)
+```
