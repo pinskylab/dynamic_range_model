@@ -39,6 +39,8 @@ toyJags <- "
 model {
   
   # priors
+  r ~ dnorm(r.hyper.a,r.hyper.b)
+  K ~ dunif(K.hyper.a,K.hyper.b)
   sdo ~ dunif(sdo.hyper.a,sdo.hyper.b)
   
   # sd to precision
@@ -48,9 +50,9 @@ model {
   N[1] ~ dpois(z0) # first time step based on known z0
   for(t in 2:lenT) { # remaining timesteps
     
-    #lambda[t] <- N[t-1] * exp(r - r * N[t-1] / K)  # Ricker growth 
-    lambda[t] <- N[t-1]
-    N[t] ~ dpois(lambda[t]) # process error
+    lambda[t] <- N[t-1] * exp(r - r * N[t-1] / K)  # Ricker growth 
+
+    N[t] ~ dpois(round(lambda[t])) # process error
   
   }
   
@@ -65,7 +67,9 @@ model {
 
 ``` {r run JAGS1, eval = TRUE, include = TRUE, echo = TRUE}
 dataJags <- list(lenT=nrow(dogfishTest), y=as.double(dogfishTest$estN), z0=round(mean(dogfishTest$estN[1])), 
-                   sdo.hyper.a=0.1, sdo.hyper.b=10)
+                 sdo.hyper.a=0.1, sdo.hyper.b=10000,
+                 r.hyper.a=1, r.hyper.b=1,
+                 K.hyper.a=1, K.hyper.b=10000)
 
 # Set up initial values for each chain
 ncJags <- 3
@@ -73,6 +77,10 @@ initvalJags <- list()
 for(i in 1:ncJags) {
   sdoinit <- runif(1, min=dataJags$sdo.hyper.a,
                    max=dataJags$sdo.hyper.b)
+  rinit <- rnorm(1, mean=dataJags$r.hyper.a,
+                   sd=dataJags$r.hyper.b)
+  Kinit <- runif(1, min=dataJags$K.hyper.a,
+                   max=dataJags$K.hyper.b)
   Ninit <- numeric(dataJags$lenT)
   Ninit[1] <- rpois(1, dataJags$z0)
   for(t in 2:dataJags$lenT) {
@@ -92,13 +100,15 @@ mJags <- jags.model(file=textConnection(object=toyJags),
                       inits=initvalJags,
                       n.chains=ncJags)
 update(mJags, n.iter = burnJags)
-jagsVarM <- c("N", "sdo")
+jagsVarM <- c("N", "sdo", "r", "K")
 fJags <- coda.samples(mJags,
                         variable.names=jagsVarM,
                         n.iter=inferJags)
 #MCMCsummary(fJags)
-MCMCplot(fJags, params = c("sdo"))
-MCMCplot(fJags, params = c("N"))
+MCMCplot(fJags, params = "sdo")
+MCMCplot(fJags, params = "r")
+MCMCplot(fJags, params = "K")
+MCMCplot(fJags, params = "N")
 MCMCtrace(fJags, params = 'N\\[10\\]', pdf = FALSE, ISB = FALSE)
 ```
 
