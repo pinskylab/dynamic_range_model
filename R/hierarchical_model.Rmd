@@ -5,7 +5,7 @@ date: "10/30/2020"
 output: html_document
 ---
 
-Credit to the SESYNCBayes course (materials [here](https://cchecastaldo.github.io/BayesianShortCourse/Syllabus.html), code [here](https://github.com/CCheCastaldo/BayesianShortCourse)) for `rjags` instruction and code. 
+Credit to https://arxiv.org/src/2002.02001v1/anc/Appendix_S1.pdf p. 72
 
 
 ```{r, eval=TRUE}
@@ -29,9 +29,7 @@ dogfishTest <- dogfish %>%
 ```
 
 Specify model structure
-Based on https://arxiv.org/src/2002.02001v1/anc/Appendix_S1.pdf p. 72
 
-This takes a few seconds to run on my laptop.
 
 ``` {r JAGS1, eval = TRUE, include = TRUE, echo = TRUE}
 
@@ -65,11 +63,13 @@ model {
 "
 ```
 
+This takes a couple minutes to run on my laptop.
+
 ``` {r run JAGS1, eval = TRUE, include = TRUE, echo = TRUE}
 dataJags <- list(lenT=nrow(dogfishTest), y=as.double(dogfishTest$estN), z0=round(mean(dogfishTest$estN[1])), 
                  sdo.hyper.a=0.1, sdo.hyper.b=10000,
                  r.hyper.a=1, r.hyper.b=1,
-                 K.hyper.a=1, K.hyper.b=10000)
+                 K.hyper.a=1, K.hyper.b=100000)
 
 # Set up initial values for each chain
 ncJags <- 3
@@ -91,7 +91,7 @@ for(i in 1:ncJags) {
 
 # define chain lengths
 burnJags <- 1000
-inferJags <- 10000
+inferJags <- 100000
 
 # Call to JAGS
 set.seed(1)
