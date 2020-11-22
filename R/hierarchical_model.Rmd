@@ -39,22 +39,17 @@ toyOpJags <- "
 model {
   
   # priors
-  #r ~ dunif(0, 2)
-  #K ~ dunif(0, 1000000) 
-  #sdp ~ dunif(0,10)
-  #sdo ~ dunif(0,10)
   
   # sd to precision
-  state.precision <- 1/(sdp*sdp)
   obs.precision <- 1/(sdo*sdo)
   
   # process model
-  N[1] ~ dnorm(z0,state.precision) # first time step based on known z0
+  N[1] ~ dpois(z0) # first time step based on known z0
   for(t in 2:lenT) { # remaining timesteps
     
     #lambda[t] <- N[t-1] * exp(r - r * N[t-1] / K)  # Ricker growth 
     lambda[t] <- N[t-1]
-    N[t] ~ dnorm(lambda[t],state.precision) # process error
+    N[t] ~ dpois(lambda[t]) # process error
   
   }
   
@@ -68,16 +63,16 @@ model {
 ```
 
 ``` {r run JAGS1, eval = TRUE, include = TRUE, echo = TRUE}
-dataOpJags <- list(lenT=nrow(dogfishTest), y=as.double(dogfishTest$estN), z0=mean(dogfishTest$estN[1]), sdp=10, sdo=10)
+dataOpJags <- list(lenT=nrow(dogfishTest), y=as.double(dogfishTest$estN), z0=round(mean(dogfishTest$estN[1])), sdo=10)
 
 # Set up initial values for each chain
 ncOpJags <- 3
 initvalOpJags <- list()
 for(i in 1:ncOpJags) {
   Ninit <- numeric(dataOpJags$lenT)
-  Ninit[1] <- rnorm(1, mean=0, sd=dataOpJags$sdp)
+  Ninit[1] <- rpois(1, dataOpJags$z0)
   for(t in 2:dataOpJags$lenT) {
-    Ninit[t] <-rnorm(1, mean=Ninit[t-1], sd=dataOpJags$sdp)
+    Ninit[t] <-rpois(1, Ninit[t-1])
   }
   initvalOpJags[[i]] <- list(N=Ninit)
 }
