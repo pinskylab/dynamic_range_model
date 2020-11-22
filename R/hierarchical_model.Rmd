@@ -35,10 +35,11 @@ This takes a few seconds to run on my laptop.
 
 ``` {r JAGS1, eval = TRUE, include = TRUE, echo = TRUE}
 
-toyOpJags <- " 
+toyJags <- " 
 model {
   
   # priors
+  sdo ~ dunif(sdo.hyper.a,sdo.hyper.b)
   
   # sd to precision
   obs.precision <- 1/(sdo*sdo)
@@ -63,49 +64,54 @@ model {
 ```
 
 ``` {r run JAGS1, eval = TRUE, include = TRUE, echo = TRUE}
-dataOpJags <- list(lenT=nrow(dogfishTest), y=as.double(dogfishTest$estN), z0=round(mean(dogfishTest$estN[1])), sdo=10)
+dataJags <- list(lenT=nrow(dogfishTest), y=as.double(dogfishTest$estN), z0=round(mean(dogfishTest$estN[1])), 
+                   sdo.hyper.a=0.1, sdo.hyper.b=10)
 
 # Set up initial values for each chain
-ncOpJags <- 3
-initvalOpJags <- list()
-for(i in 1:ncOpJags) {
-  Ninit <- numeric(dataOpJags$lenT)
-  Ninit[1] <- rpois(1, dataOpJags$z0)
-  for(t in 2:dataOpJags$lenT) {
+ncJags <- 3
+initvalJags <- list()
+for(i in 1:ncJags) {
+  sdoinit <- runif(1, min=dataJags$sdo.hyper.a,
+                   max=dataJags$sdo.hyper.b)
+  Ninit <- numeric(dataJags$lenT)
+  Ninit[1] <- rpois(1, dataJags$z0)
+  for(t in 2:dataJags$lenT) {
     Ninit[t] <-rpois(1, Ninit[t-1])
   }
-  initvalOpJags[[i]] <- list(N=Ninit)
+  initvalJags[[i]] <- list(N=Ninit)
 }
 
 # define chain lengths
-burnOpJags <- 1000
-inferOpJags <- 10000
+burnJags <- 1000
+inferJags <- 10000
 
 # Call to JAGS
 set.seed(1)
-mOpJags <- jags.model(file=textConnection(object=toyOpJags),
-                      data=dataOpJags,
-                      inits=initvalOpJags,
-                      n.chains=ncOpJags)
-update(mOpJags, n.iter = burnOpJags)
-jagspOVarM <- c("N")
-fOpJags <- coda.samples(mOpJags,
-                        variable.names=jagspOVarM,
-                        n.iter=inferOpJags)
-MCMCsummary(fOpJags)
-MCMCplot(fOpJags, params = c("N"))
-MCMCtrace(fOpJags, params = 'N\\[10\\]', pdf = FALSE, ISB = FALSE)
+mJags <- jags.model(file=textConnection(object=toyJags),
+                      data=dataJags,
+                      inits=initvalJags,
+                      n.chains=ncJags)
+update(mJags, n.iter = burnJags)
+jagsVarM <- c("N", "sdo")
+fJags <- coda.samples(mJags,
+                        variable.names=jagsVarM,
+                        n.iter=inferJags)
+#MCMCsummary(fJags)
+MCMCplot(fJags, params = c("sdo"))
+MCMCplot(fJags, params = c("N"))
+MCMCtrace(fJags, params = 'N\\[10\\]', pdf = FALSE, ISB = FALSE)
 ```
+
 ```{r plot estimates and data}
 # get mean state estimates
-zsOpJags <- apply(as.matrix(fOpJags)[,paste0("N[",1:dataOpJags$lenT,"]")],2,mean)
+zsJags <- apply(as.matrix(fJags)[,paste0("N[",1:dataJags$lenT,"]")],2,mean)
 
-plot(1:dataOpJags$lenT, dataOpJags$y,
+plot(1:dataJags$lenT, dataJags$y,
      pch=3, cex = 0.8, col=grey(0.4), ty="o",
      xlab = "t", ylab = expression(N[t]),
-     xlim = c(0,dataOpJags$lenT),
+     xlim = c(0,dataJags$lenT),
      las = 1)
-points(1:dataOpJags$lenT, zsOpJags, cex=0.6, col="blue", pch=19)
+points(1:dataJags$lenT, zsJags, cex=0.6, col="blue", pch=19)
 legend("top",
        legend = c("Obs", "Smooth states"),
        pch = c(3, 19),
