@@ -37,20 +37,22 @@ toyJags <- "
 model {
   
   # priors
-  r ~ dnorm(r.hyper.a,r.hyper.b)
-  K ~ dunif(K.hyper.a,K.hyper.b)
-  sdo ~ dunif(sdo.hyper.a,sdo.hyper.b)
+  r ~ dnorm(r.hyper.a,r.hyper.b) # intrinsic pop growth rate
+  K ~ dunif(K.hyper.a,K.hyper.b) # carrying capacity
+  sdo ~ dunif(sdo.hyper.a,sdo.hyper.b) # sd parameter for dnorm obs errors
+  sdp ~ dunif(sdp.hyper.a, sdp.hyper.b) # overdispersion parameter for negbin process errors
   
   # sd to precision
   obs.precision <- 1/(sdo*sdo)
   
   # process model
-  N[1] ~ dpois(z0) # first time step based on known z0
+  p[1] <- sdp/(sdp+z0) # convert to dnegbin parameter
+  N[1] ~ dnegbin(p[1], sdp) # first time step based on known z0
   for(t in 2:lenT) { # remaining timesteps
     
     lambda[t] <- N[t-1] * exp(r - r * N[t-1] / K)  # Ricker growth 
-
-    N[t] ~ dpois(round(lambda[t])) # process error
+    p[t] <- sdp/(sdp+lambda[t]) # convert to dnegbin parameter
+    N[t] ~ dnegbin(p[t], sdp) # process error
   
   }
   
@@ -63,11 +65,12 @@ model {
 "
 ```
 
-This takes a couple minutes to run on my laptop.
+This takes a few minutes to run on my laptop. Slowed down a little with K~runif(1, 100000). Slowed down a lot with dnegbin process errors.
 
 ``` {r run JAGS1, eval = TRUE, include = TRUE, echo = TRUE}
 dataJags <- list(lenT=nrow(dogfishTest), y=as.double(dogfishTest$estN), z0=round(mean(dogfishTest$estN[1])), 
                  sdo.hyper.a=0.1, sdo.hyper.b=10000,
+                 sdp.hyper.a=0, sdp.hyper.b=50,
                  r.hyper.a=1, r.hyper.b=1,
                  K.hyper.a=1, K.hyper.b=100000)
 
@@ -77,6 +80,8 @@ initvalJags <- list()
 for(i in 1:ncJags) {
   sdoinit <- runif(1, min=dataJags$sdo.hyper.a,
                    max=dataJags$sdo.hyper.b)
+  sdpinit <- runif(1, min=dataJags$sdp.hyper.a,
+                   max=dataJags$sdp.hyper.b)
   rinit <- rnorm(1, mean=dataJags$r.hyper.a,
                    sd=dataJags$r.hyper.b)
   Kinit <- runif(1, min=dataJags$K.hyper.a,
@@ -86,7 +91,7 @@ for(i in 1:ncJags) {
   for(t in 2:dataJags$lenT) {
     Ninit[t] <-rpois(1, Ninit[t-1])
   }
-  initvalJags[[i]] <- list(N=Ninit)
+  initvalJags[[i]] <- list(sdo = sdoinit, sdp=sdpinit, r=rinit, K=Kinit, N=Ninit)
 }
 
 # define chain lengths
@@ -100,12 +105,13 @@ mJags <- jags.model(file=textConnection(object=toyJags),
                       inits=initvalJags,
                       n.chains=ncJags)
 update(mJags, n.iter = burnJags)
-jagsVarM <- c("N", "sdo", "r", "K")
+jagsVarM <- c("N", "sdo", "sdp", "r", "K")
 fJags <- coda.samples(mJags,
                         variable.names=jagsVarM,
                         n.iter=inferJags)
 #MCMCsummary(fJags)
 MCMCplot(fJags, params = "sdo")
+MCMCplot(fJags, params = "sdp")
 MCMCplot(fJags, params = "r")
 MCMCplot(fJags, params = "K")
 MCMCplot(fJags, params = "N")
