@@ -1,0 +1,112 @@
+---
+title: "hierarchical_model_stan"
+author: "Alexa Fredston and Malin Pinsky "
+date: "11/23/2020"
+output: html_document
+---
+
+
+```{r packages}
+library(rstan)
+library(rstanarm)
+library(tidybayes)
+library(bayesplot)
+```
+
+
+```{r, eval=TRUE}
+#library(rjags)
+library(tidyverse)
+library(here)
+#library(MCMCvis)
+
+dogfish <- read_csv(here("processed-data","dogfish_prepped_data.csv"))
+
+dogfishTest <- dogfish %>% 
+  filter(lengthclass=="adult") %>% 
+  group_by(year) %>% 
+  summarise(obsN = sum(numlengthclass)) 
+
+lenT <- nrow(dogfishTest)
+
+```
+
+Note that variables in stan cannot have periods.
+
+```{stan, output.var="model1"}
+
+data{
+
+int lenT; // the number of observations
+
+vector[lenT] obsN; // vector of observed number of individuals
+
+// parameters for priors
+real rHyperMu;
+real rHyperSigma;
+real KHyperLower;
+real KHyperUpper;
+real sigmaObsHyperLower;
+real sigmaObsHyperUpper;
+real sigmaProcessHyperLower;
+real sigmaProcessHyperUpper; 
+
+} 
+
+transformed data{
+
+real z0; // starting population size
+
+z0 = round(obsN[1]); // this was previously wrapped in mean() which threw a stan error
+
+}
+
+parameters{ // define possible domain as all real numbers for now; can place bounds if desired
+
+real r; // intrinsic pop growth rate
+real K; // carrying capacity
+real sigmaObs; // SD for observation errors, dnorm
+real sigmaProcess; // SD for process errors, negbin
+
+} 
+
+transformed parameters{
+
+vector[lenT] N; // N, latent variable we are trying to estimate--do I need to initialize this? and if so, is this the right place? 
+
+vector[lenT] p; // dnegbin parameter
+
+p[1] = sigmaProcess / (sigmaProcess + z0);
+
+}
+
+model{
+
+// define distributions for priors
+r ~ normal(rHyperMu, rHyperSigma);
+K ~ uniform(KHyperLower, KHyperUpper);
+sigmaObs ~ uniform(sigmaObsHyperLower, sigmaObsHyperUpper);
+sigmaProcess ~ uniform(sigmaProcessHyperLower, sigmaProcessHyperUpper);
+
+N[1] ~ neg_binomial(p[1], sigmaProcess); // first time step based on known z0
+
+for(t in 2:lenT) { // remaining timesteps
+
+lambda[t] = N[t-1] * exp(r - r * N[t-1] / K);  // Ricker growth 
+p[t] = sigmaProcess/(sigmaProcess+lambda[t]); // convert to dnegbin parameter
+N[t] ~ neg_binomial(p[t], sigmaProcess); // process error
+// this is throwing an error "No matches for:   real ~ neg_binomial(real, real)"
+}
+
+// observation model
+for(t in 1:lenT){
+y[t] ~ normal(N[t],sigmaObs);
+}
+
+
+
+}
+
+```
+
+
