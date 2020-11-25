@@ -1,10 +1,15 @@
 ---
-title: "hierarchical_model_stan"
-author: "Alexa Fredston and Malin Pinsky "
-date: "11/23/2020"
+title: "Dynamic range model in Stan"
+author: "Alexa Fredston and Malin Pinsky"
+date: "begun November 2020"
 output: html_document
 ---
 
+Useful sources for Bayesian population models and Bayesian implementation in R that we referenced while building this script: 
+
+* https://github.com/DanOvando/learn-stan 
+* https://arxiv.org/src/2002.02001v1/anc/Appendix_S1.pdf p. 72
+* https://cchecastaldo.github.io/BayesianShortCourse/Syllabus.html
 
 ```{r packages}
 library(rstan)
@@ -27,11 +32,11 @@ dogfishTest <- dogfish %>%
   group_by(year) %>% 
   summarise(obsN = sum(numlengthclass)) 
 
-lenT <- nrow(dogfishTest)
-
 ```
 
 Note that variables in stan cannot have periods.
+
+Here's the stan script: 
 
 ```{stan, output.var="model1"}
 
@@ -39,7 +44,7 @@ data{
 
 int lenT; // the number of observations
 
-vector[lenT] obsN; // vector of observed number of individuals
+vector[lenT] y; // vector of observed number of individuals
 
 // parameters for priors
 real rHyperMu;
@@ -50,16 +55,17 @@ real sigmaObsHyperLower;
 real sigmaObsHyperUpper;
 real sigmaProcessHyperLower;
 real sigmaProcessHyperUpper; 
+real z0;
 
 } 
 
-transformed data{
+//transformed data{
 
-real z0; // starting population size
+//real z0; // starting population size
 
-z0 = round(obsN[1]); // this was previously wrapped in mean() which threw a stan error
+//z0 = round(y[1]); // this was previously wrapped in mean() which threw a stan error
 
-}
+//}
 
 parameters{ // define possible domain as all real numbers for now; can place bounds if desired
 
@@ -72,7 +78,7 @@ real sigmaProcess; // SD for process errors, negbin
 
 transformed parameters{
 
-vector[lenT] N; // N, latent variable we are trying to estimate--do I need to initialize this? and if so, is this the right place? 
+vector[lenT] N; // N, latent variable we are trying to estimate--do I need to initialize this? and if so, is this the right place? same question for p
 
 vector[lenT] p; // dnegbin parameter
 
@@ -107,6 +113,57 @@ y[t] ~ normal(N[t],sigmaObs);
 
 }
 
+```
+
+And model implementation from R:
+
+```{r model1}
+warmups <- 1000
+
+total_iterations <- 2000
+
+max_treedepth <-  10
+
+n_chains <-  4
+
+n_cores <- 1
+
+dataStan1 <- list(lenT=nrow(dogfishTest), 
+                 y=as.double(dogfishTest$obsN), 
+                 z0=round(mean(dogfishTest$obsN[1])), # could also create this inside the stan model, not sure which is better
+                 sigmaObsHyperLower=0.1, sigmaObsHyperUpper=10000,
+                 sigmaProcessHyperLower=0, sigmaProcessHyperUpper=50,
+                 rHyperMu=1, rHyperSigma=1,
+                 KHyperLower=1, KHyperUpper=100000)
+
+initStan1 <- list()
+for(i in 1:n_chains) {
+  sdoinit <- runif(1, min=dataStan1$sigmaObsHyperLower,
+                   max=dataStan1$sigmaObsHyperUpper)
+  sdpinit <- runif(1, min=dataStan1$sigmaProcessHyperLower,
+                   max=dataStan1$sigmaProcessHyperUpper)
+  rinit <- rnorm(1, mean=dataStan1$rHyperMu,
+                   sd=dataStan1$rHyperSigma)
+  Kinit <- runif(1, min=dataStan1$KHyperLower,
+                   max=dataStan1$KHyperUpper)
+  Ninit <- numeric(dataStan1$lenT)
+  Ninit[1] <- rpois(1, dataStan1$z0)
+  for(t in 2:dataStan1$lenT) {
+    Ninit[t] <-rpois(1, Ninit[t-1])
+  }
+  initStan1[[i]] <- list(sigmaObs = sdoinit, sigmaProcess=sdpinit, r=rinit, K=Kinit, N=Ninit)
+}
+
+model1_fit <- stan(file = here::here("scripts","model1.stan"),
+                 data = data,
+                 chains = n_chains,
+                 warmup = warmups,
+                 iter = total_iterations,
+                 cores = n_cores,
+                 refresh = 250,
+                 init = initStan1,
+                 control = list(max_treedepth = max_treedepth,
+                                adapt_delta = 0.95))
 ```
 
 
