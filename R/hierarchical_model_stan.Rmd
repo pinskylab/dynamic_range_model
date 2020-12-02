@@ -10,6 +10,8 @@ Useful sources for Bayesian population models and Bayesian implementation in R t
 * https://github.com/DanOvando/learn-stan 
 * https://arxiv.org/src/2002.02001v1/anc/Appendix_S1.pdf p. 72
 * https://cchecastaldo.github.io/BayesianShortCourse/Syllabus.html
+* https://mc-stan.org/docs/2_25/stan-users-guide/mark-recapture-models.html 
+
 
 ```{r packages}
 library(rstan)
@@ -19,7 +21,7 @@ library(bayesplot)
 ```
 
 
-```{r, eval=TRUE}
+```{r data, eval=TRUE}
 #library(rjags)
 library(tidyverse)
 library(here)
@@ -56,6 +58,7 @@ real sigma_obs_hyper_upper;
 real sigma_process_hyper_lower;
 real sigma_process_hyper_upper; 
 real z0;
+real lambda0;
 
 } 
 
@@ -73,15 +76,17 @@ real r; // intrinsic pop growth rate
 real K; // carrying capacity
 real sigma_obs; // SD for observation errors, dnorm
 real sigma_process; // SD for process errors, negbin
+vector[len_t] N; // population size--should be discrete (integer values), but Stan can't estimate latent discrete variables, so we're estimating it as continuous here 
 
 } 
 
 transformed parameters{
 
 vector[len_t] p; // dnegbin parameter
-vector[len_t] lambda; // Ricker growth parameter 
+vector[len_t] lambda; // Ricker growth parameter
 
 p[1] = sigma_process / (sigma_process + z0); 
+lambda[1] = lambda0;
 
 for(t in 2:len_t) {
 lambda[t] = N[t-1] * exp(r - r * N[t-1] / K); // depends on N which isn't defined yet, but when I moved up N it said integers can't be defined in a parameters block. 
@@ -92,8 +97,6 @@ p[t] = sigma_process / (sigma_process + lambda[t]); // error that it cannot divi
 }
 
 model{
-int N[len_t]; // N, set this up as a 1D array of integers, not a vector, for the negative binomial distribution; tried to specify that it must be non-negative but it caused a syntax error, revisit this. 
-
 // define distributions for priors 
 r ~ normal(r_hyper_mu, r_hyper_sigma);
 K ~ uniform(K_hyper_lower, K_hyper_upper);
@@ -101,35 +104,15 @@ sigma_obs ~ uniform(sigma_obs_hyper_lower, sigma_obs_hyper_upper);
 sigma_process ~ uniform(sigma_process_hyper_lower, sigma_process_hyper_upper);
 
 // process model; note that Stan allows vectorization of operations, so these aren't indexed anymore. not sure if the first time step specifications will work for p[1]...
-N ~ neg_binomial(p, sigma_process)
+N ~ gamma(p, sigma_process); // wanted a negative binomial when it was discrete... I know the math is wrong for this distribution now!
 
 // observation model
-y ~ normal(N, sigma_obs)
-
-//for(t in 2:len_t) { // remaining timesteps
-
-//lambda[t] = N[t-1] * exp(r - r * N[t-1] / K);  // Ricker growth 
-//p[t] = sigma_process / (sigma_process + lambda[t]); // convert to dnegbin parameter
-// N[t] ~ neg_binomial(p[t], sigma_process); // process error
-// this is throwing an error "No matches for:   real ~ neg_binomial(real, real)"
-//}
-
-// observation model
-//for(t in 1:len_t){
-//y[t] ~ normal(N[t],sigma_obs);
-//}
-
-
-
+y ~ normal(N, sigma_obs);
 }
 
-generated quantities{
-vector[len_t] t;
-
-
-
-
-}
+//generated quantities{
+//vector[len_t] t;
+//}
 
 ```
 
@@ -138,7 +121,7 @@ And model implementation from R:
 ```{r model1}
 warmups <- 1000
 
-total_iterations <- 2000
+total_iterations <- 20000
 
 max_treedepth <-  10
 
@@ -147,12 +130,13 @@ n_chains <-  4
 n_cores <- 1
 
 dataStan1 <- list(len_t=nrow(dogfishTest), 
-                 y=as.double(dogfishTest$num_obs), 
-                 z0=round(mean(dogfishTest$num_obs[1])), # could also create this inside the stan model, not sure which is better
-                 sigma_obs_hyper_lower=0.1, sigma_obs_hyper_upper=10000,
-                 sigma_process_hyper_lower=0, sigma_process_hyper_upper=50,
-                 r_hyper_mu=1, r_hyper_sigma=1,
-                 K_hyper_lower=1, K_hyper_upper=100000)
+                  y=as.double(dogfishTest$num_obs), 
+                  z0=round(mean(dogfishTest$num_obs[1])), # could also create this inside the stan model, not sure which is better
+                  lambda0=1000, # NO IDEA IF THIS IS THE RIGHT BALLPARK!
+                  sigma_obs_hyper_lower=0.1, sigma_obs_hyper_upper=10000,
+                  sigma_process_hyper_lower=0, sigma_process_hyper_upper=50,
+                  r_hyper_mu=1, r_hyper_sigma=1,
+                  K_hyper_lower=1, K_hyper_upper=100000)
 
 initStan1 <- list()
 for(i in 1:n_chains) {
@@ -161,9 +145,9 @@ for(i in 1:n_chains) {
   sdpinit <- runif(1, min=dataStan1$sigma_process_hyper_lower,
                    max=dataStan1$sigma_process_hyper_upper)
   rinit <- rnorm(1, mean=dataStan1$r_hyper_mu,
-                   sd=dataStan1$r_hyper_sigma)
+                 sd=dataStan1$r_hyper_sigma)
   Kinit <- runif(1, min=dataStan1$K_hyper_lower,
-                   max=dataStan1$K_hyper_upper)
+                 max=dataStan1$K_hyper_upper)
   Ninit <- numeric(dataStan1$len_t)
   Ninit[1] <- rpois(1, dataStan1$z0)
   for(t in 2:dataStan1$len_t) {
@@ -172,16 +156,22 @@ for(i in 1:n_chains) {
   initStan1[[i]] <- list(sigma_obs = sdoinit, sigma_process=sdpinit, r=rinit, K=Kinit, N=Ninit)
 }
 
-model1_fit <- stan(file = here::here("scripts","model1.stan"),
-                 data = data,
-                 chains = n_chains,
-                 warmup = warmups,
-                 iter = total_iterations,
-                 cores = n_cores,
-                 refresh = 250,
-                 init = initStan1,
-                 control = list(max_treedepth = max_treedepth,
-                                adapt_delta = 0.95))
+model1_fit <- # stan(file = here::here("R","model1.stan"),
+  sampling(model1,
+           data = dataStan1,
+           chains = n_chains,
+           warmup = warmups,
+           iter = total_iterations,
+           cores = n_cores,
+           refresh = 250,
+           init = initStan1,
+           control = list(max_treedepth = max_treedepth,
+                          adapt_delta = 0.95))
 ```
 
+Evaluating the model:
 
+```{r model1 eval}
+rstanarm::launch_shinystan(model1_fit)
+
+```
