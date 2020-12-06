@@ -5,6 +5,8 @@ date: "begun November 2020"
 output: html_document
 ---
 
+## General notes
+
 Useful sources for Bayesian population models and Bayesian implementation in R that we referenced while building this script: 
 
 * https://github.com/DanOvando/learn-stan 
@@ -12,6 +14,15 @@ Useful sources for Bayesian population models and Bayesian implementation in R t
 * https://cchecastaldo.github.io/BayesianShortCourse/Syllabus.html
 * https://mc-stan.org/docs/2_25/stan-users-guide/mark-recapture-models.html 
 
+## Model notes
+
+* Stan can't estimate discrete latent variables, so we've moved N from being discrete to continuous
+
+## To-do
+
+* Revisit choices of initial values
+* Add random Poisson noise around estimates of N every year (took this out to ensure Stan model was working correctly)
+* Move away from uniform priors
 
 ```{r packages}
 library(rstan)
@@ -48,18 +59,8 @@ int len_t; // the number of observations
 
 vector[len_t] y; // vector of observed number of individuals
 
-// parameters for priors
-real r_hyper_mu;
-real r_hyper_sigma;
-real K_hyper_lower;
-real K_hyper_upper;
-real sigma_obs_hyper_lower;
-real sigma_obs_hyper_upper;
-real sigma_process_hyper_lower;
-real sigma_process_hyper_upper; 
+// data inputs
 real z0;
-real lambda0;
-
 } 
 
 //transformed data{
@@ -72,6 +73,18 @@ real lambda0;
 
 parameters{ // define possible domain as all real numbers for now; can place bounds if desired
 
+// these are either latent variables or will get priors later
+
+//hyperparameters 
+real r_hyper_mu;
+real r_hyper_sigma;
+real K_hyper_lower;
+real K_hyper_upper;
+real sigma_obs_hyper_mean;
+real sigma_obs_hyper_sd;
+real sigma_process_hyper_lower;
+real sigma_process_hyper_upper; 
+
 real r; // intrinsic pop growth rate
 real K; // carrying capacity
 real sigma_obs; // SD for observation errors, dnorm
@@ -82,15 +95,21 @@ vector[len_t] N; // population size--should be discrete (integer values), but St
 
 transformed parameters{
 
-vector[len_t] p; // dnegbin parameter
+// define parameter vectors
 vector[len_t] lambda; // Ricker growth parameter
+vector[len_t] gamma_shape; // gamma parameter for process model
+vector[len_t] gamma_rate; // gamma parameter for process model
 
-p[1] = sigma_process / (sigma_process + z0); 
-lambda[1] = lambda0;
+// define initial values
+//lambda[1] = lambda0;
+//gamma_shape[1] = gamma_shape0;
+//gamma_rate[1] = gamma_rate0;
 
+// define subsequent values after inits
 for(t in 2:len_t) {
-lambda[t] = N[t-1] * exp(r - r * N[t-1] / K); // depends on N which isn't defined yet, but when I moved up N it said integers can't be defined in a parameters block. 
-p[t] = sigma_process / (sigma_process + lambda[t]); // error that it cannot divide real / vector
+lambda[t] = N[t-1] * exp(r - r * N[t-1] / K); 
+gamma_shape[t] = (lambda[t]^2) / (sigma_process^2);
+gamma_rate[t] = lambda[t] / (sigma_process^2);
 }
 
 
@@ -100,25 +119,26 @@ model{
 // define distributions for priors 
 r ~ normal(r_hyper_mu, r_hyper_sigma);
 K ~ uniform(K_hyper_lower, K_hyper_upper);
-sigma_obs ~ uniform(sigma_obs_hyper_lower, sigma_obs_hyper_upper);
+sigma_obs ~ normal(sigma_obs_hyper_mean, sigma_obs_hyper_sd);
 sigma_process ~ uniform(sigma_process_hyper_lower, sigma_process_hyper_upper);
 
-// process model; note that Stan allows vectorization of operations, so these aren't indexed anymore. not sure if the first time step specifications will work for p[1]...
-N ~ gamma(p, sigma_process); // wanted a negative binomial when it was discrete... I know the math is wrong for this distribution now!
+N ~ gamma(gamma_shape, gamma_rate); 
 
 // observation model
-y ~ normal(N, sigma_obs);
+y ~ normal(N, sigma_obs); 
 }
+
 
 //generated quantities{
 //vector[len_t] t;
 //}
 
+
 ```
 
 And model implementation from R:
 
-```{r model1}
+```{r model1, echo=FALSE, results='hide', refresh=0}
 warmups <- 1000
 
 total_iterations <- 20000
@@ -129,31 +149,58 @@ n_chains <-  4
 
 n_cores <- 1
 
+# starting values from real data 
 dataStan1 <- list(len_t=nrow(dogfishTest), 
                   y=as.double(dogfishTest$num_obs), 
-                  z0=round(mean(dogfishTest$num_obs[1])), # could also create this inside the stan model, not sure which is better
-                  lambda0=1000, # NO IDEA IF THIS IS THE RIGHT BALLPARK!
-                  sigma_obs_hyper_lower=0.1, sigma_obs_hyper_upper=10000,
-                  sigma_process_hyper_lower=0, sigma_process_hyper_upper=50,
-                  r_hyper_mu=1, r_hyper_sigma=1,
-                  K_hyper_lower=1, K_hyper_upper=100000)
+                  z0=round(mean(dogfishTest$num_obs[1])) 
+                  )
 
+# starting values for parameters, to initialize chains (all drawn from distributions... eventually need to set.seed) 
 initStan1 <- list()
 for(i in 1:n_chains) {
-  sdoinit <- runif(1, min=dataStan1$sigma_obs_hyper_lower,
-                   max=dataStan1$sigma_obs_hyper_upper)
-  sdpinit <- runif(1, min=dataStan1$sigma_process_hyper_lower,
-                   max=dataStan1$sigma_process_hyper_upper)
-  rinit <- rnorm(1, mean=dataStan1$r_hyper_mu,
-                 sd=dataStan1$r_hyper_sigma)
-  Kinit <- runif(1, min=dataStan1$K_hyper_lower,
-                 max=dataStan1$K_hyper_upper)
-  Ninit <- numeric(dataStan1$len_t)
+  lambda_init <- rpois(1, dataStan1$z0) # random Poisson draw with mean at starting pop size 
+  gamma_shape_init <- runif(1, min=1e3, max=1e7)
+  gamma_rate_init <- runif(1, min=1, max=1000)
+  sigma_obs_hyper_mean_init <- rpois(1, dataStan1$z0)
+  sigma_obs_hyper_sd_init <-rnorm(1, mean=1000, sd=100)
+  sigma_process_hyper_lower_init <- runif(1, min=0, max=10)
+  sigma_process_hyper_upper_init <- runif(1, min=10, max=50)
+  r_hyper_mu_init <- rnorm(1, mean=0, sd=1)
+  r_hyper_sigma_init <- rnorm(1, mean=1, sd=0.5)
+  K_hyper_lower_init <- rnorm(1, mean=1, sd=0.5)
+  K_hyper_upper_init <- rnorm(1, 100000, sd=50000)
+  sdoinit <- rnorm(1, mean=sigma_obs_hyper_mean_init,
+                   sd=sigma_obs_hyper_sd_init)
+  sdpinit <- runif(1, min=sigma_process_hyper_lower_init,
+                   max=sigma_process_hyper_upper_init)
+  rinit <- rnorm(1, mean=r_hyper_mu_init,
+                 sd=r_hyper_sigma_init)
+  Kinit <- runif(1, min=K_hyper_lower_init,
+                 max=K_hyper_upper_init)
+  Ninit <- numeric(dataStan1$len_t) 
   Ninit[1] <- rpois(1, dataStan1$z0)
-  for(t in 2:dataStan1$len_t) {
-    Ninit[t] <-rpois(1, Ninit[t-1])
-  }
-  initStan1[[i]] <- list(sigma_obs = sdoinit, sigma_process=sdpinit, r=rinit, K=Kinit, N=Ninit)
+  
+  # this part is meant to add some extra noise between years in our estimate of N. I'm concerned that it's "writing over" the estimation of N, so I'm commenting it out for now; I'll add it back in later. 
+  # for(t in 2:dataStan1$len_t) {
+  #   Ninit[t] <-rpois(1, Ninit[t-1])
+  # }
+  initStan1[[i]] <- list(lambda = lambda_init, 
+                         sigma_obs = sdoinit, 
+                         sigma_process=sdpinit, 
+                         r=rinit, 
+                         K=Kinit, 
+                         N=Ninit, 
+                         gamma_shape=gamma_shape_init, 
+                         gamma_rate=gamma_rate_init, 
+                         sigma_obs_hyper_mean=sigma_obs_hyper_mean_init,  
+                         sigma_obs_hyper_sd=sigma_obs_hyper_sd_init,
+                         sigma_process_hyper_lower=sigma_process_hyper_lower_init, 
+                         sigma_process_hyper_upper=sigma_process_hyper_upper_init, 
+                         r_hyper_mu=r_hyper_mu_init, 
+                         r_hyper_sigma=r_hyper_sigma_init,
+                         K_hyper_lower=K_hyper_lower_init,
+                         K_hyper_upper=K_hyper_upper_init
+                         )
 }
 
 model1_fit <- # stan(file = here::here("R","model1.stan"),
@@ -172,6 +219,8 @@ model1_fit <- # stan(file = here::here("R","model1.stan"),
 Evaluating the model:
 
 ```{r model1 eval}
+summary(model1_fit)
+plot(model1_fit)
 rstanarm::launch_shinystan(model1_fit)
 
 ```
