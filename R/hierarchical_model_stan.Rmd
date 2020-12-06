@@ -61,6 +61,7 @@ vector[len_t] y; // vector of observed number of individuals
 
 // data inputs
 real z0;
+real sd0; 
 } 
 
 //transformed data{
@@ -91,29 +92,20 @@ real sigma_obs; // SD for observation errors, dnorm
 real sigma_process; // SD for process errors, negbin
 vector[len_t] N; // population size--should be discrete (integer values), but Stan can't estimate latent discrete variables, so we're estimating it as continuous here 
 
-} 
-
-transformed parameters{
-
+// time varying latent variables
 // define parameter vectors
 vector[len_t] lambda; // Ricker growth parameter
 vector[len_t] gamma_shape; // gamma parameter for process model
 vector[len_t] gamma_rate; // gamma parameter for process model
 
-// define initial values
-//lambda[1] = lambda0;
-//gamma_shape[1] = gamma_shape0;
-//gamma_rate[1] = gamma_rate0;
+} 
 
-// define subsequent values after inits
-for(t in 2:len_t) {
-lambda[t] = N[t-1] * exp(r - r * N[t-1] / K); 
-gamma_shape[t] = (lambda[t]^2) / (sigma_process^2);
-gamma_rate[t] = lambda[t] / (sigma_process^2);
-}
+// transformed parameters{
+
+// }
 
 
-}
+
 
 model{
 // define distributions for priors 
@@ -122,7 +114,18 @@ K ~ uniform(K_hyper_lower, K_hyper_upper);
 sigma_obs ~ normal(sigma_obs_hyper_mean, sigma_obs_hyper_sd);
 sigma_process ~ uniform(sigma_process_hyper_lower, sigma_process_hyper_upper);
 
-N ~ gamma(gamma_shape, gamma_rate); 
+// define initial values of time-varying latent variables; not sure if these will vary among chains
+N[1] ~ gamma((z0^2/sd0^2),(z0/sd0^2));
+lambda[1] ~ gamma((z0^2/sd0^2),(z0/sd0^2));
+gamma_shape[1] ~ uniform(1e3, 1e7);
+gamma_rate[1] ~ uniform(1, 1000);
+
+for(t in 2:len_t){
+lambda[t] = N[t-1] * exp(r - r * N[t-1] / K); 
+gamma_shape[t] = (lambda[t]^2) / (sigma_process^2);
+gamma_rate[t] = lambda[t] / (sigma_process^2);
+}
+N[2:len_t] ~ gamma(gamma_shape, gamma_rate); 
 
 // observation model
 y ~ normal(N, sigma_obs); 
@@ -152,15 +155,13 @@ n_cores <- 1
 # starting values from real data 
 dataStan1 <- list(len_t=nrow(dogfishTest), 
                   y=as.double(dogfishTest$num_obs), 
-                  z0=round(mean(dogfishTest$num_obs[1])) 
-                  )
+                  z0=round(mean(dogfishTest$num_obs[1])),
+                  sd0=sd(dogfishTest$num_obs)
+)
 
 # starting values for parameters, to initialize chains (all drawn from distributions... eventually need to set.seed) 
 initStan1 <- list()
 for(i in 1:n_chains) {
-  lambda_init <- rpois(1, dataStan1$z0) # random Poisson draw with mean at starting pop size 
-  gamma_shape_init <- runif(1, min=1e3, max=1e7)
-  gamma_rate_init <- runif(1, min=1, max=1000)
   sigma_obs_hyper_mean_init <- rpois(1, dataStan1$z0)
   sigma_obs_hyper_sd_init <-rnorm(1, mean=1000, sd=100)
   sigma_process_hyper_lower_init <- runif(1, min=0, max=10)
@@ -177,21 +178,12 @@ for(i in 1:n_chains) {
                  sd=r_hyper_sigma_init)
   Kinit <- runif(1, min=K_hyper_lower_init,
                  max=K_hyper_upper_init)
-  Ninit <- numeric(dataStan1$len_t) 
-  Ninit[1] <- rpois(1, dataStan1$z0)
   
-  # this part is meant to add some extra noise between years in our estimate of N. I'm concerned that it's "writing over" the estimation of N, so I'm commenting it out for now; I'll add it back in later. 
-  # for(t in 2:dataStan1$len_t) {
-  #   Ninit[t] <-rpois(1, Ninit[t-1])
-  # }
-  initStan1[[i]] <- list(lambda = lambda_init, 
+  initStan1[[i]] <- list(
                          sigma_obs = sdoinit, 
                          sigma_process=sdpinit, 
                          r=rinit, 
                          K=Kinit, 
-                         N=Ninit, 
-                         gamma_shape=gamma_shape_init, 
-                         gamma_rate=gamma_rate_init, 
                          sigma_obs_hyper_mean=sigma_obs_hyper_mean_init,  
                          sigma_obs_hyper_sd=sigma_obs_hyper_sd_init,
                          sigma_process_hyper_lower=sigma_process_hyper_lower_init, 
@@ -200,7 +192,7 @@ for(i in 1:n_chains) {
                          r_hyper_sigma=r_hyper_sigma_init,
                          K_hyper_lower=K_hyper_lower_init,
                          K_hyper_upper=K_hyper_upper_init
-                         )
+  )
 }
 
 model1_fit <- # stan(file = here::here("R","model1.stan"),
