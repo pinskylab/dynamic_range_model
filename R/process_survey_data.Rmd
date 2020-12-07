@@ -26,21 +26,17 @@ library(data.table)
 here <- here::here
 
 OApath <- "~/github/OceanAdapt_9815545/"
-sppOfInt <- c("Squalus acanthias")
+# sppOfInt <- c("Squalus acanthias")
 regOfInt <- c("Northeast US Spring", "Northeast US Fall", "Southeast US Spring", "Southeast US Summer", "Southeast US Fall", "Scotian Shelf")
 # options: c("Aleutian Islands", "Eastern Bering Sea", "Gulf of Alaska", "Northeast US Spring", "Northeast US Fall", "West Coast Triennial", "West Coast Annual", "Gulf of Mexico", "Southeast US Spring", "Southeast US Summer", "Southeast US Fall", "Scotian Shelf")
 
 ```
 
 
-# Get zero-inflated data from OceanAdapt
-```{r dat_exploded, eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
+# Get zero-inflated data from OceanAdapt, and other datasets
+```{r data, eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
 load(paste0(OApath,"data_clean/dat_exploded.RData"))
 
-dat_exploded_filter <- dat.exploded %>%
-  filter(spp %in% sppOfInt,
-         region %in% regOfInt
-  ) 
 ```
 
 # Get length-frequency data from individual surveys
@@ -51,14 +47,16 @@ dat_exploded_filter <- dat.exploded %>%
 load(paste0(OApath,"data_raw/neus_Survdat.RData"))
 load(paste0(OApath, "data_raw/neus_SVSPP.RData"))
 
+dat_exploded_neus <- dat.exploded %>% 
+  filter(region %in% c("Northeast US Spring", "Northeast US Fall"))
+
 neus_len <- survdat %>% 
   # create a haulid for joining with dat.exploded
   mutate(haulid = paste(formatC(CRUISE6, width=6, flag=0), formatC(STATION, width=3, flag=0), formatC(STRATUM, width=4, flag=0), sep='-')) %>% 
   select(haulid, SVSPP, LENGTH, NUMLEN) %>% 
-  filter(haulid %in% dat_exploded_filter$haulid) %>% # pare down to hauls of interest 
+  filter(haulid %in% dat_exploded_neus$haulid) %>% # pare down to hauls of interest 
   left_join(spp, by="SVSPP") %>% # get species names from species codes
   mutate(spp = str_to_sentence(SCINAME)) %>% # change to format of sppOfInt
- # filter(spp %in% sppOfInt) %>%
   select(spp, haulid, LENGTH, NUMLEN) %>%
   filter(!is.na(LENGTH))
 
@@ -70,7 +68,6 @@ btemp <- survdat %>%
   distinct() %>%
   rename("btemp"=BOTTEMP)
   
-
 ```
 
 ## Scotian Shelf
@@ -92,7 +89,34 @@ scotraw <- scotfiles %>%
   ))) 
 ```
 
-## Southeast US
+## Southeast US reef fish survey
+
+```{r serfs, eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
+
+#SERFS
+serfs_len_raw <- read.delim(here::here("survey-data","southeast_reef_fish_survey_length_frequency_04_10_2020_raw.txt"), sep=",")
+
+serfs_len_tidy <- serfs_len_raw %>%
+  rename_all(tolower) %>% 
+  mutate_all(tolower) %>% # so dataframe isn't screaming at me
+  mutate_all(funs(str_replace(., "=", ""))) %>% # raw data has random equals signs everywhere
+  mutate_all(na_if, "not applicable") %>% 
+  select_if(~!all(is.na(.))) %>%  # remove columns that just have NAs in them 
+  distinct() %>% 
+  mutate(date = mdy(date)) %>% 
+  select(eventname, date, speciesscientificname, speciescommonname, length, numbermeasure, totalnumber, latitudestart, longitudestart) %>% 
+  distinct() %>% 
+  rename("sppCommon"=speciescommonname,
+         "sppLatin"=speciesscientificname) %>% 
+  mutate(length = as.numeric(length),
+         totalnumber = as.numeric(totalnumber)) %>% 
+  filter(!is.na(length), !is.na(totalnumber)) %>% # just removing one weird NA row
+  mutate(year = lubridate::year(date),
+         haulid = eventname) %>% 
+  select(haulid, year, sppLatin, length, numbermeasure, totalnumber, latitudestart, longitudestart)
+```
+
+## Southeast US trawl
 
 This survey has a lot of weight-related measurements and I'm not totally sure how they relate to each other: SPECIESTOTALWEIGHT, SPECIESSUBWEIGHT, SPECIESWGTPROCESSED, CATCHSUBSAMPLED, CATCHWEIGHT, CATCHSUBWEIGHT. 
 
@@ -103,8 +127,7 @@ seus_catch <- read_csv(unz("~/github/OceanAdapt_9815545/data_raw/seus_catch.csv.
   mutate_all(list(~str_replace(., "=", ""))) %>% 
   mutate_all(list(~str_replace(., '"', ''))) %>% 
   mutate_all(list(~str_replace(., '"', ''))) %>%
-  mutate(spp = str_to_sentence(SPECIESSCIENTIFICNAME)) %>%
-  filter(spp %in% sppOfInt)
+  mutate(spp = str_to_sentence(SPECIESSCIENTIFICNAME))
 ```
 
 As per Zoe Kitchel and Ria Kobernuss, the [SEAMAP online data portal](https://www2.dnr.sc.gov/seamap/Account/LogOn?ReturnUrl=%2fseamap%2fReports) does have an option to download finer-scale data that includes length data. They shared it with me (May 14 2020) with the following note, and it's imported below:
@@ -125,14 +148,14 @@ seus_len <- seus_specimens %>%
 
 ```
 
-I'm not sure how to use the Southeast data because (unlike Northeast) length measurements don't appear to have been recorded on *every* haul, so we won't always have associated length data for positive catches. 
+I'm not sure how to use the Southeast data because (unlike Northeast) length measurements don't appear to have been recorded on *every* haul, so we won't always have associated length data for positive catches. They're also only measured for a subset of species that (of our study species) only includes spiny dogfish.
 
-# Summarize length data into length classes CURRENTLY NEUS ONLY
+# Summarize length data into length classes CURRENTLY NEUS ONLY BUT BOTH SEASONS
 
 Note that the chunk below is written for one species only (spiny dogfish)--will need to be updated in the future when more species are added in. 
 
-```{r classes,  eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
-dogfish_neus_len <- neus_len %>% filter(spp=="Squalus acanthias") # eventually neus_len will contain other species
+```{r dogfish,  eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
+dogfish_neus_len <- neus_len %>% filter(spp=="Squalus acanthias") 
 
 dogfish_lm_F <- 75 #cm; see SAW 43 p17
 dogfish_lm_M <- 60 
@@ -146,27 +169,24 @@ dogfish_neus_len_agg <- dogfish_neus_len %>%
   group_by(haulid, spp, lengthclass) %>% 
   summarise(numlengthclass = sum(NUMLEN)) # aggregate counts
 
-dogfish_len_zeros <- expand_grid(haulid=unique(dat_exploded_filter$haulid),  lengthclass=unique(dogfish_neus_len_agg$lengthclass),
+dogfish_neus_len_zeros <- expand_grid(haulid=unique(dat_exploded_neus$haulid),  lengthclass=unique(dogfish_neus_len_agg$lengthclass),
                                  spp="Squalus acanthias") %>% # get all possible combinations of haulid and length class 
   left_join(dogfish_neus_len_agg, by=c("spp","haulid","lengthclass")) %>% # add length counts 
-  left_join(dat_exploded_filter, by=c("spp","haulid")) %>% # add haul data 
+  left_join(dat_exploded_neus, by=c("spp","haulid")) %>% # add haul data 
   left_join(btemp, by="haulid") %>%
   select(-wtcpue) %>% # not accurate after all the joins/expansions
   mutate(numlengthclass = replace_na(numlengthclass, 0)) # replace NAs with true zeroes
 ```
 
-```{r summer flounder}
-# exploring summer flounder data dist. for stats class
+Generating the same datasets for the other three focal species, in order to visualize their data distributions. So far just using NEUS for summer flounder (which is also found in the SEAMAP survey) and shortfin squid (which I think is actually constrained just to the NEUS survey).
 
+**Revisit break points for size classes and data inputs for these three!**
+
+```{r summer flounder,  eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
 fluke_neus_len <- neus_len %>% filter(spp=="Paralichthys dentatus")
 
 fluke_lm <- 28 # FOR EXPLORATORY PURPOSES ONLY! FROM FISHBASE--REVISIT THIS
 fluke_ljuv <- min(fluke_neus_len$LENGTH) + (fluke_lm - min(fluke_neus_len$LENGTH))/2
-
-dat_exploded_fluke <- dat.exploded %>%
-  filter(spp=="Paralichthys dentatus",
-         region %in% regOfInt
-  ) 
 
 fluke_neus_len_agg <- fluke_neus_len %>%
   mutate(lengthclass = ifelse(LENGTH <= fluke_ljuv, "smalljuv",
@@ -174,42 +194,92 @@ fluke_neus_len_agg <- fluke_neus_len %>%
   group_by(haulid, spp, lengthclass) %>% 
   summarise(numlengthclass = sum(NUMLEN))  
 
-fluke_len_zeros <- expand_grid(haulid=unique(dat_exploded_filter$haulid),  lengthclass=unique(fluke_neus_len_agg$lengthclass),
+fluke_neus_len_zeros <- expand_grid(haulid=unique(dat_exploded_neus$haulid),  lengthclass=unique(fluke_neus_len_agg$lengthclass),
                                  spp="Paralichthys dentatus") %>%  
   left_join(fluke_neus_len_agg, by=c("spp","haulid","lengthclass")) %>% 
-  left_join(dat_exploded_fluke, by=c("spp","haulid")) %>% 
+  left_join(dat_exploded_neus, by=c("spp","haulid")) %>% 
   left_join(btemp, by="haulid") %>%
   select(-wtcpue) %>% 
   mutate(numlengthclass = replace_na(numlengthclass, 0)) 
+```
 
-fluke_len_zeros %>% 
-  filter(year==1975, lat < 41, lat >= 40, lengthclass=="adult") %>% 
-  ggplot() +
-  geom_histogram(aes(x=numlengthclass))
+```{r shortfin squid,  eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
+squid_neus_len <- neus_len %>% filter(spp=="Illex illecebrosus")
 
-fluke_len_zeros %>% 
-  filter(year==1975, lat < 41, lat >= 40, lengthclass=="adult", numlengthclass>0) %>% 
-  ggplot() +
-  geom_histogram(aes(x=numlengthclass))
+squid_lm <- 20 # FOR EXPLORATORY PURPOSES ONLY! based on a best guess from this sentence in the FAO page: "Summer hatchlings achieve a mantle length of about 18 or 19 cm after 1 year (females are slightly larger than males) and are ready to spawn in winter at an age of about 1 ½ years (Mesnil, 1977)." http://www.fao.org/fishery/species/2720/en
+squid_ljuv <- min(squid_neus_len$LENGTH) + (squid_lm - min(squid_neus_len$LENGTH))/2
 
-fluke_len_zeros %>% 
-  filter(year==2009, lat < 41, lat >= 40, lengthclass=="adult", numlengthclass>0) %>% 
-  ggplot() +
-  geom_histogram(aes(x=numlengthclass))
+squid_neus_len_agg <- squid_neus_len %>%
+  mutate(lengthclass = ifelse(LENGTH <= squid_ljuv, "smalljuv",
+                              ifelse(LENGTH < squid_lm, "largejuv", "adult"))) %>% 
+  group_by(haulid, spp, lengthclass) %>% 
+  summarise(numlengthclass = sum(NUMLEN))  
 
-fluke_len_zeros %>% 
-  filter(year==1999, lat < 41, lat >= 40, lengthclass=="adult", numlengthclass>0) %>% 
-  ggplot() +
-  geom_histogram(aes(x=numlengthclass))
+squid_neus_len_zeros <- expand_grid(haulid=unique(dat_exploded_neus$haulid),  lengthclass=unique(squid_neus_len_agg$lengthclass),
+                                 spp="Illex illecebrosus") %>%  
+  left_join(squid_neus_len_agg, by=c("spp","haulid","lengthclass")) %>% 
+  left_join(dat_exploded_neus, by=c("spp","haulid")) %>% 
+  left_join(btemp, by="haulid") %>%
+  select(-wtcpue) %>% 
+  mutate(numlengthclass = replace_na(numlengthclass, 0)) 
+```
+
+```{r gray triggerfish,  eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
+# SERFS 
+gray_serfs_len <- serfs_len_tidy %>% 
+  filter(sppLatin=="balistes capriscus")
+
+# using SEDAR reported Lm values, and converting from FL to TL *in millimeters*, then converting to cm 
+gray_t_lm_TL_female <- (-18.27+1.21*177)/10
+gray_t_lm_TL_male <- (-18.27+1.21*180)/10
+gray_lm <- mean(c(gray_t_lm_TL_female,gray_t_lm_TL_male))
+gray_ljuv <- min(gray_serfs_len$length) + (gray_lm - min(gray_serfs_len$length))/2 # need to think more about how to define this based on multiple surveys. minimum across all of them? in SERFS it's 10 
+
+gray_serfs_len_agg <- gray_serfs_len %>%
+  mutate(lengthclass = ifelse(length <= gray_ljuv, "smalljuv",
+                              ifelse(length < gray_lm, "largejuv", "adult"))) %>% 
+  group_by(haulid, sppLatin, lengthclass) %>% 
+  summarise(numlengthclass = sum(totalnumber))  
+
+gray_serfs_len_zeros <- expand_grid(haulid=unique(serfs_len_tidy$haulid),  lengthclass=unique(gray_serfs_len_agg$lengthclass),
+                                 sppLatin="balistes capriscus") %>%  
+  left_join(gray_serfs_len_agg, by=c("sppLatin","haulid","lengthclass")) %>% 
+left_join(serfs_len_tidy %>% select(haulid, year, latitudestart, longitudestart) %>% distinct(), by="haulid") %>% # adding haul info back in 
+  mutate(numlengthclass = replace_na(numlengthclass, 0)) 
+
+# since this species isn't in the SEUS length-frequency data, let's skip it for now
+
+#NEUS
+# gray_neus_len <- neus_len %>% filter(spp=="Balistes capriscus") # 751 observations, not that helpful... min len 1??
+# 
+# gray_neus_len_agg <- gray_neus_len %>%
+#   mutate(lengthclass = ifelse(LENGTH <= gray_ljuv, "smalljuv",
+#                               ifelse(LENGTH < gray_lm, "largejuv", "adult"))) %>% 
+#   group_by(haulid, spp, lengthclass) %>% 
+#   summarise(numlengthclass = sum(NUMLEN))  
+# 
+# # this is not joining properly for some reason
+# gray_neus_len_zeros <- expand_grid(haulid=unique(dat_exploded_neus$haulid),  lengthclass=unique(gray_neus_len_agg$lengthclass),
+#                                  spp="Balistes capriscus") %>%  
+#   left_join(gray_neus_len_agg, by=c("spp","haulid","lengthclass")) %>% 
+#   left_join(dat_exploded_neus, by=c("spp","haulid")) %>% 
+#    left_join(btemp, by="haulid") %>% 
+#   select(-wtcpue) %>% 
+#   mutate(numlengthclass = replace_na(numlengthclass, 0)) 
 
 ```
+
+
 # Write out data
 
 In a format that can be imported into Python
 
 ```{r export df, eval=TRUE, echo=FALSE, results=FALSE, message=FALSE }
 # this csv is too big for github, so zip it
-write_csv(dogfish_len_zeros, here::here("processed-data", "dogfish_prepped_data.csv"))
+write_csv(dogfish_neus_len_zeros, here::here("processed-data", "dogfish_prepped_data.csv"))
+write_csv(fluke_neus_len_zeros, here::here("processed-data", "fluke_prepped_data.csv"))
+write_csv(squid_neus_len_zeros, here::here("processed-data", "squid_prepped_data.csv"))
+write_csv(gray_serfs_len_zeros, here::here("processed-data", "gray_prepped_data.csv"))
 
 zip(zipfile = here::here("processed-data", "dogfish_prepped_data.zip"),
     files = here::here("processed-data", "dogfish_prepped_data.csv"))
