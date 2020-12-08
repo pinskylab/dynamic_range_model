@@ -43,8 +43,20 @@ dogfish <- read_csv(here("processed-data","dogfish_prepped_data.csv"))
 dogfishTest <- dogfish %>% 
   filter(lengthclass=="adult") %>% 
   group_by(year) %>% 
-  summarise(num_obs = sum(numlengthclass)) 
+  mutate(num_obs = sum(numlengthclass),
+         sd_obs = sd(numlengthclass)) %>% # this is standard deviation of different counts in a year, not of overall abundance over time
+  select(year, num_obs, sd_obs) %>% 
+  distinct()
+# moving away from spiny dogfish because it is massively overdispersed and no single distribution will be able to produce values at low densities (1, 3, 10...) and at very high densities (5000, 8000, 10000) of dogfish; will eventually need a mixture model, and/or to totally disregard small values and assume everything under some threshold is basically equivalent
 
+fluke <- read_csv(here("processed-data","fluke_prepped_data.csv"))
+
+flukeTest <- fluke %>% 
+  filter(lengthclass=="adult",
+         year>=1972) %>% 
+  group_by(year) %>% 
+  summarise(num_obs = sum(numlengthclass))
+  
 ```
 
 Note that variables in stan cannot have periods.
@@ -92,22 +104,19 @@ real sigma_obs; // SD for observation errors, dnorm
 real sigma_process; // SD for process errors, negbin
 vector[len_t] N; // population size--should be discrete (integer values), but Stan can't estimate latent discrete variables, so we're estimating it as continuous here 
 
-// time varying latent variables
-// define parameter vectors
-vector[len_t] lambda; // Ricker growth parameter
-vector[len_t] gamma_shape; // gamma parameter for process model
-vector[len_t] gamma_rate; // gamma parameter for process model
-
 } 
 
 // transformed parameters{
 
 // }
 
-
-
-
 model{
+
+// time varying latent variables--need to be defined in model block
+vector[len_t] lambda; // Ricker growth parameter
+vector[len_t] gamma_shape; // gamma parameter for process model
+vector[len_t] gamma_rate; // gamma parameter for process model
+
 // define distributions for priors 
 r ~ normal(r_hyper_mu, r_hyper_sigma);
 K ~ uniform(K_hyper_lower, K_hyper_upper);
@@ -153,10 +162,10 @@ n_chains <-  4
 n_cores <- 1
 
 # starting values from real data 
-dataStan1 <- list(len_t=nrow(dogfishTest), 
-                  y=as.double(dogfishTest$num_obs), 
-                  z0=round(mean(dogfishTest$num_obs[1])),
-                  sd0=sd(dogfishTest$num_obs)
+dataStan1 <- list(len_t=nrow(flukeTest), 
+                  y=as.double(flukeTest$num_obs), 
+                  z0=round(mean(flukeTest$num_obs[1])),
+                  sd0=sd(flukeTest$num_obs)
 )
 
 # starting values for parameters, to initialize chains (all drawn from distributions... eventually need to set.seed) 
@@ -183,7 +192,6 @@ for(i in 1:n_chains) {
                          sigma_obs = sdoinit, 
                          sigma_process=sdpinit, 
                          r=rinit, 
-                         K=Kinit, 
                          sigma_obs_hyper_mean=sigma_obs_hyper_mean_init,  
                          sigma_obs_hyper_sd=sigma_obs_hyper_sd_init,
                          sigma_process_hyper_lower=sigma_process_hyper_lower_init, 
