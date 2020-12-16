@@ -13,6 +13,7 @@ Useful sources for Bayesian population models and Bayesian implementation in R t
 * https://arxiv.org/src/2002.02001v1/anc/Appendix_S1.pdf p. 72
 * https://cchecastaldo.github.io/BayesianShortCourse/Syllabus.html
 * https://mc-stan.org/docs/2_25/stan-users-guide/mark-recapture-models.html 
+* https://mc-stan.org/docs/2_25/functions-reference/nbalt.html (and entire manual)
 
 ## Model notes
 
@@ -59,8 +60,6 @@ flukeTest <- fluke %>%
 
 ```
 
-Note that variables in stan cannot have periods.
-
 Here's the stan script: 
 
 ```{stan, output.var="model1"}
@@ -69,7 +68,8 @@ data{
 
 int<lower=1> len_t; // the number of observations
 
-vector[len_t] y; // vector of observed number of individuals
+//vector[len_t] y; // vector of observed number of individuals
+int y[len_t];
 
 // data inputs
 real<lower=0> z0;
@@ -93,14 +93,15 @@ real r_hyper_mu;
 real<lower=0> r_hyper_sigma;
 real<lower=0> K_hyper_lower;
 real<lower=K_hyper_lower> K_hyper_upper;
-real<lower=0> sigma_obs_hyper_mean;
-real<lower=0> sigma_obs_hyper_sd;
+real<lower=0, upper=K_hyper_upper> phi_obs_hyper_mean;
+real<lower=0> phi_obs_hyper_sd;
 real<lower=0> sigma_process_hyper_lower;
 real<lower=sigma_process_hyper_lower> sigma_process_hyper_upper; 
 
 real r; // intrinsic pop growth rate
 real<lower=K_hyper_lower, upper=K_hyper_upper> K; // carrying capacity
-real<lower=0> sigma_obs; // SD for observation errors 
+real<lower=0, upper=K_hyper_upper> phi_obs;
+//real<lower=0> sigma_obs; // SD for observation errors 
 real<lower=sigma_process_hyper_lower, upper=sigma_process_hyper_upper> sigma_process; // SD for process errors 
 
 vector<lower=0>[len_t] N; // population size--should be discrete (integer values), but Stan can't estimate latent discrete variables, so we're estimating it as continuous here 
@@ -136,7 +137,7 @@ sigma_process ~ uniform(sigma_process_hyper_lower, sigma_process_hyper_upper);
 //K_hyper_upper ~ normal(0, 1000);
 //sigma_process_hyper_upper ~ normal(0, 1000);
 r ~ normal(r_hyper_mu, r_hyper_sigma);
-sigma_obs ~ normal(sigma_obs_hyper_mean, sigma_obs_hyper_sd);
+phi_obs ~ normal(phi_obs_hyper_mean, phi_obs_hyper_sd);
 
 // define initial values of time-varying latent variables 
 N[1] ~ gamma((z0^2/sd0^2),(z0/sd0^2));
@@ -148,14 +149,17 @@ gamma_rate0 ~ uniform(1, 1000);
 N[2:len_t] ~ gamma(gamma_shape[2:len_t], gamma_rate[2:len_t]); 
 
 // observation model
-y ~ normal(N, sigma_obs); 
+for(t in 1:len_t) {
+y[t] ~ neg_binomial_2(N[t], phi_obs); // this version of neg binom has a more familiar form 
+}
+
 }
 
 ```
 
 And model implementation from R:
 
-```{r model1, echo=FALSE, results='hide', refresh=0}
+```{r model1, echo=FALSE, results='hide', message=FALSE, refresh=0}
 warmups <- 1000
 
 total_iterations <- 20000
@@ -176,16 +180,16 @@ dataStan1 <- list(len_t=nrow(flukeTest),
 # starting values for parameters, to initialize chains (all drawn from distributions... eventually need to set.seed) 
 initStan1 <- list()
 for(i in 1:n_chains) {
-  sigma_obs_hyper_mean_init <- rpois(1, dataStan1$z0)
-  sigma_obs_hyper_sd_init <-rnorm(1, mean=100, sd=10)
+  phi_obs_hyper_mean_init <- rpois(1, dataStan1$z0) # not sure if this is the right way to think about this parameter now that it isn't sigma_obs
+  phi_obs_hyper_sd_init <-rnorm(1, mean=100, sd=10)
   sigma_process_hyper_lower_init <- runif(1, min=0, max=10)
   sigma_process_hyper_upper_init <- runif(1, min=10, max=50)
   r_hyper_mu_init <- rnorm(1, mean=1, sd=1)
   r_hyper_sigma_init <- rnorm(1, mean=1, sd=0.5)
   K_hyper_lower_init <- rnorm(1, mean=100, sd=10)
   K_hyper_upper_init <- rnorm(1, 10000, sd=1000)
-  sdoinit <- rnorm(1, mean=sigma_obs_hyper_mean_init,
-                   sd=sigma_obs_hyper_sd_init)
+  phiinit <- rnorm(1, mean=phi_obs_hyper_mean_init,
+                   sd=phi_obs_hyper_sd_init)
   sdpinit <- runif(1, min=sigma_process_hyper_lower_init,
                    max=sigma_process_hyper_upper_init)
   rinit <- rnorm(1, mean=r_hyper_mu_init,
@@ -194,10 +198,10 @@ for(i in 1:n_chains) {
                  max=K_hyper_upper_init)
   
   initStan1[[i]] <- list(
-    sigma_obs = sdoinit, 
+    phi_obs = phiinit, 
     sigma_process=sdpinit, 
-    sigma_obs_hyper_mean=sigma_obs_hyper_mean_init,  
-    sigma_obs_hyper_sd=sigma_obs_hyper_sd_init,
+    phi_obs_hyper_mean=phi_obs_hyper_mean_init,  
+    phi_obs_hyper_sd=phi_obs_hyper_sd_init,
     sigma_process_hyper_lower=sigma_process_hyper_lower_init, 
     sigma_process_hyper_upper=sigma_process_hyper_upper_init, 
     r_hyper_mu=r_hyper_mu_init, 
