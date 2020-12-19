@@ -92,7 +92,6 @@ parameters{ // define possible domain as all real numbers for now; can place bou
 
 real<lower=0> r; // intrinsic pop growth rate
 real<lower=0, upper=100000> K; // carrying capacity
-//real<lower=0> sigma_obs; // SD for observation errors 
 real<lower=0> sigma_process; 
 real<lower=0> phi_obs; 
 
@@ -126,7 +125,6 @@ model{
 K ~ uniform(100, 10000);
 sigma_process ~ uniform(0, 500); //can we constrain this more?
 
-//K_hyper_upper ~ normal(0, 1000);
 r ~ normal(1, 1);
 phi_obs ~ normal(0.75, 0.25); // from https://mc-stan.org/docs/2_20/functions-reference/nbalt.html  phi = mu^2 / (sigma^2-mu)
 
