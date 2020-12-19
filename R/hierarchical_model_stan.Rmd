@@ -89,20 +89,11 @@ parameters{ // define possible domain as all real numbers for now; can place bou
 // these are either latent variables or will get priors later
 
 //hyperparameters 
-real r_hyper_mu;
-real<lower=0> r_hyper_sigma;
-real<lower=0> K_hyper_lower;
-real<lower=K_hyper_lower> K_hyper_upper;
-real<lower=0, upper=K_hyper_upper> phi_obs_hyper_mean;
-real<lower=0> phi_obs_hyper_sd;
-real<lower=0> sigma_process_hyper_lower;
-real<lower=sigma_process_hyper_lower> sigma_process_hyper_upper; 
 
-real r; // intrinsic pop growth rate
-real<lower=K_hyper_lower, upper=K_hyper_upper> K; // carrying capacity
-real<lower=0, upper=K_hyper_upper> phi_obs;
-//real<lower=0> sigma_obs; // SD for observation errors 
-real<lower=sigma_process_hyper_lower, upper=sigma_process_hyper_upper> sigma_process; // SD for process errors 
+real<lower=0> r; // intrinsic pop growth rate
+real<lower=0, upper=100000> K; // carrying capacity
+real<lower=0> sigma_process; 
+real<lower=0> phi_obs; 
 
 vector<lower=0>[len_t] N; // population size--should be discrete (integer values), but Stan can't estimate latent discrete variables, so we're estimating it as continuous here 
 real<lower=0> lambda0; // Ricker growth parameter at time step 1
@@ -131,13 +122,11 @@ model{
 
 // uniforms not strictly necessary if the bounds are appropriately declared in 
 // the parameters block -- keeping for now as dists may change
-K ~ uniform(K_hyper_lower, K_hyper_upper);
-sigma_process ~ uniform(sigma_process_hyper_lower, sigma_process_hyper_upper);
+K ~ uniform(100, 10000);
+sigma_process ~ uniform(0, 500); //can we constrain this more?
 
-//K_hyper_upper ~ normal(0, 1000);
-//sigma_process_hyper_upper ~ normal(0, 1000);
-r ~ normal(r_hyper_mu, r_hyper_sigma);
-phi_obs ~ normal(phi_obs_hyper_mean, phi_obs_hyper_sd);
+r ~ normal(1, 1);
+phi_obs ~ normal(0.75, 0.25); // from https://mc-stan.org/docs/2_20/functions-reference/nbalt.html  phi = mu^2 / (sigma^2-mu)
 
 // define initial values of time-varying latent variables 
 N[1] ~ gamma((z0^2/sd0^2),(z0/sd0^2));
@@ -180,30 +169,19 @@ dataStan1 <- list(len_t=nrow(flukeTest),
 # starting values for parameters, to initialize chains (all drawn from distributions... eventually need to set.seed) 
 initStan1 <- list()
 for(i in 1:n_chains) {
-  phi_obs_hyper_mean_init <- rpois(1, dataStan1$z0) # not sure if this is the right way to think about this parameter now that it isn't sigma_obs
-  phi_obs_hyper_sd_init <-rnorm(1, mean=100, sd=10)
-  sigma_process_hyper_lower_init <- runif(1, min=0, max=10)
-  sigma_process_hyper_upper_init <- runif(1, min=10, max=50)
-  r_hyper_mu_init <- rnorm(1, mean=1, sd=1)
-  r_hyper_sigma_init <- rnorm(1, mean=1, sd=0.5)
-  K_hyper_lower_init <- rnorm(1, mean=100, sd=10)
-  K_hyper_upper_init <- rnorm(1, 10000, sd=1000)
-  phiinit <- rnorm(1, mean=phi_obs_hyper_mean_init,
-                   sd=phi_obs_hyper_sd_init)
-  sdpinit <- runif(1, min=sigma_process_hyper_lower_init,
-                   max=sigma_process_hyper_upper_init)
-  rinit <- rnorm(1, mean=r_hyper_mu_init,
-                 sd=r_hyper_sigma_init)
-  Kinit <- runif(1, min=K_hyper_lower_init,
-                 max=K_hyper_upper_init)
+  phiinit <- rnorm(1, mean=0.75,
+                   sd=0.25)
+  sdpinit <- runif(1, runif(1, min=0, max=10),
+                   max=runif(1, min=10, max=500)
+                   )
+  rinit <- rnorm(1, mean=0.75,
+                 sd=0.25)
+  Kinit <- runif(1, min=1000,
+                 max=10000)
   
   initStan1[[i]] <- list(
     phi_obs = phiinit, 
     sigma_process=sdpinit, 
-    phi_obs_hyper_mean=phi_obs_hyper_mean_init,  
-    phi_obs_hyper_sd=phi_obs_hyper_sd_init,
-    sigma_process_hyper_lower=sigma_process_hyper_lower_init, 
-    sigma_process_hyper_upper=sigma_process_hyper_upper_init, 
     r_hyper_mu=r_hyper_mu_init, 
     r_hyper_sigma=r_hyper_sigma_init,
     K_hyper_lower=K_hyper_lower_init,
