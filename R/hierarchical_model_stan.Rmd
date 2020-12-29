@@ -21,9 +21,11 @@ Useful sources for Bayesian population models and Bayesian implementation in R t
 
 ## To-do
 
-* Revisit choices of initial values
+* Revisit choices of initial values, especially when adding in dimensions over which variables are indexed, which will reduce the total number of individuals in each cell
 * Add random Poisson noise around estimates of N every year (took this out to ensure Stan model was working correctly)
-* Move away from uniform priors
+* Move away from uniform priors (done?)
+* Figure out how to deal with true NAs in data, which are instances with no samples of a patch in a year (not true zeroes, although I've replaced them with zeroes temporarily)
+* make r, lambda0, gamma_rate0, and gamma_shape0 spatially and temporally varying (currently estimated as one parameter)
 
 ```{r packages}
 library(rstan)
@@ -58,6 +60,15 @@ flukeTest <- fluke %>%
   group_by(year) %>% 
   summarise(num_obs = sum(numlengthclass))
 
+fluke_lat_time <- fluke %>% 
+  mutate(lat_round = round(lat)) %>% 
+  filter(lengthclass=="adult",
+         year>=1972,
+         lat_round >= 34 # because we're just using nefsc survey for now, which rarely goes below 34N
+         ) %>% 
+  group_by(year, lat_round) %>% 
+  summarise(num_obs = sum(numlengthclass)) %>% 
+  ungroup()
 ```
 
 Here's the stan script: 
@@ -65,57 +76,50 @@ Here's the stan script:
 ```{stan, output.var="model1"}
 
 data{
+int<lower=1> len_t; // the number of time points
+int<lower=0> len_i; // number of patches 
 
-int<lower=1> len_t; // the number of observations
-
-//vector[len_t] y; // vector of observed number of individuals
-int y[len_t];
+int<lower=0> y[len_i, len_t]; // defining y as an array of integers with patches as rows and years as columns
 
 // data inputs
-real<lower=0> z0;
-real<lower=0> sd0; 
+vector<lower=0>[len_i] z0; // vector of starting pop. values, one per patch 
+real<lower=0> sd0; // scalar
 } 
 
 //transformed data{
-
-//real z0; // starting population size
-
-//z0 = round(y[1]);  
-
 //}
 
-parameters{ // define possible domain as all real numbers for now; can place bounds if desired
-
-// these are either latent variables or will get priors later
-
-//hyperparameters 
-
+parameters{ 
 real<lower=0> r; // intrinsic pop growth rate
 real<lower=0, upper=100000> K; // carrying capacity
 real<lower=0> sigma_process; 
 real<lower=0> phi_obs; 
 
-vector<lower=0>[len_t] N; // population size--should be discrete (integer values), but Stan can't estimate latent discrete variables, so we're estimating it as continuous here 
-real<lower=0> lambda0; // Ricker growth parameter at time step 1
-real<lower=1e3, upper=1e7> gamma_shape0; // gamma parameter for process model at time step 1 - manually setting range
-real<lower=1, upper=1e3> gamma_rate0; // gamma parameter for process model at time step 1 - manually setting range
+real<lower=0> N[len_i,len_t]; // array of population size--should be discrete (integer values), but Stan can't estimate latent discrete variables, so we're estimating it as continuous here 
+vector<lower=0>[len_i] lambda0; // Ricker growth parameter at time step 1
+vector<lower=1e3, upper=1e7>[len_i] gamma_shape0; // gamma parameter for process model at time step 1 - manually setting range
+vector<lower=1, upper=1e3>[len_i] gamma_rate0; // gamma parameter for process model at time step 1 - manually setting range
 
 } 
 
 transformed parameters {
-vector<lower=0>[len_t] lambda;
-vector[len_t] gamma_shape; 
-vector[len_t] gamma_rate;
+real<lower=0> lambda[len_i,len_t];
+real<lower=0> gamma_shape[len_i,len_t]; 
+real<lower=0> gamma_rate[len_i,len_t];
 
-lambda[1] = lambda0;
-gamma_shape[1] = gamma_shape0;
-gamma_rate[1] = gamma_rate0;
+for(i in 1:len_i){
+  lambda[i,1] = lambda0[i]; // assigning patches all the same initial values for now
+  gamma_shape[i,1] = gamma_shape0[i];
+  gamma_rate[i,1] = gamma_rate0[i];
+
+}
 
 for(t in 2:len_t){
-lambda[t] = N[t-1] * exp(r - r * N[t-1] / K); 
-gamma_shape[t] = (lambda[t]^2) / (sigma_process^2);
-gamma_rate[t] = lambda[t] / (sigma_process^2);
-}
+  for(i in 1:len_i){
+    lambda[i,t] = N[i,t-1] * exp(r - r * N[i,t-1] / K); 
+    gamma_shape[i,t] = (lambda[i,t]^2) / (sigma_process^2);
+    gamma_rate[i,t] = lambda[i,t] / (sigma_process^2);
+}}
 }
 
 model{
@@ -129,18 +133,24 @@ r ~ normal(1, 1);
 phi_obs ~ normal(0.75, 0.25); // from https://mc-stan.org/docs/2_20/functions-reference/nbalt.html  phi = mu^2 / (sigma^2-mu)
 
 // define initial values of time-varying latent variables 
-N[1] ~ gamma((z0^2/sd0^2),(z0/sd0^2));
-lambda0 ~ gamma((z0^2/sd0^2),(z0/sd0^2));
-gamma_shape0 ~ uniform(1e3, 1e7);
-gamma_rate0 ~ uniform(1, 1000);
+for(i in 1:len_i){
+  N[i,1] ~ gamma((z0[i]^2/sd0^2),(z0[i]/sd0^2));
+  lambda0[i] ~ gamma((z0[i]^2/sd0^2),(z0[i]/sd0^2));
+  gamma_shape0[i] ~ uniform(1e3, 1e7);
+  gamma_rate0[i] ~ uniform(1, 1000);
+}
 
 //define later values of N (other quantities are defined, not estimated, after the first value)
-N[2:len_t] ~ gamma(gamma_shape[2:len_t], gamma_rate[2:len_t]); 
+for(t in 2:len_t){
+  for(i in 1:len_i){
+N[i,t] ~ gamma(gamma_shape[i,t], gamma_rate[i,t]);  
+}}
 
 // observation model
-for(t in 1:len_t) {
-y[t] ~ neg_binomial_2(N[t], phi_obs); // this version of neg binom has a more familiar form 
-}
+for(t in 1:len_t) 
+  for(i in 1:len_i)
+    y[i,t] ~ neg_binomial_2(N[i,t], phi_obs); // this version of neg binom has a more familiar form 
+
 
 }
 
@@ -159,12 +169,20 @@ n_chains <-  4
 
 n_cores <- 1
 
+y_array <- reshape2::acast(fluke_lat_time, lat_round~year, value.var="num_obs") # could also do this with pivot_wider
+y_array <- replace_na(y_array, 0) # DANGER! this is writing over true NAs (years with zero samples in a lat band) with zeroes. I'm doing this here for coding simplicity but need to fix it later.
+z0 <- fluke_lat_time %>% filter(year == min(year)) %>% arrange(lat_round) %>% pull(num_obs)
+
 # starting values from real data 
-dataStan1 <- list(len_t=nrow(flukeTest), 
-                  y=as.double(flukeTest$num_obs), 
-                  z0=round(mean(flukeTest$num_obs[1])),
-                  sd0=sd(flukeTest$num_obs)
+dataStan1 <- list(len_t=length(unique(fluke_lat_time$year)),
+                  len_i=length(unique(fluke_lat_time$lat_round)),
+                  y=y_array, # matrix of real pop. sizes; should have dimensions [len_i, len_t]
+                  z0=z0, # vector of starting pop. sizes from lowest lat to highest; should have length of len_i
+                  sd0=sd(z0) # keep this as a single value for now? also, should it be sd of year 1 or all years? 
 )
+
+## DANGER! replacing 0s with 1s here just so gamma will work, but we are writing over the real data!
+dataStan1$z0 <- ifelse(dataStan1$z0>0, dataStan1$z0, 1)
 
 # starting values for parameters, to initialize chains (all drawn from distributions... eventually need to set.seed) 
 initStan1 <- list()
@@ -182,10 +200,6 @@ for(i in 1:n_chains) {
   initStan1[[i]] <- list(
     phi_obs = phiinit, 
     sigma_process=sdpinit, 
-    r_hyper_mu=r_hyper_mu_init, 
-    r_hyper_sigma=r_hyper_sigma_init,
-    K_hyper_lower=K_hyper_lower_init,
-    K_hyper_upper=K_hyper_upper_init,
     r=rinit, 
     K=Kinit
   )
@@ -209,6 +223,6 @@ Evaluating the model:
 ```{r model1 eval}
 summary(model1_fit)
 plot(model1_fit)
-rstanarm::launch_shinystan(model1_fit)
+# rstanarm::launch_shinystan(model1_fit)
 
 ```
