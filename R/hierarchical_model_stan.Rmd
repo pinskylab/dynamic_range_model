@@ -225,8 +225,6 @@ plot(model1_fit)
 check_divergences(model1_fit)
 # rstanarm::launch_shinystan(model1_fit)
 
-tmp <- summary(model1_fit)
-
 # convert to a df 
 model1_summary <- summary(model1_fit)$summary %>% 
   as.data.frame() %>% 
@@ -244,6 +242,9 @@ model1_N <- model1_summary %>%
          patch = as.numeric(patch), 
          lat = patch + min(fluke_lat_time$lat_round) - 1,
          year = year_t + min(fluke_lat_time$year) - 1)
+```
+
+```{r model1 plot}
 
 # plot abundance time-series by patch
 model1_N %>% ggplot(aes(x=year, y=mean)) +
