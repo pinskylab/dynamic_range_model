@@ -151,7 +151,6 @@ for(t in 1:len_t)
   for(i in 1:len_i)
     y[i,t] ~ neg_binomial_2(N[i,t], phi_obs); // this version of neg binom has a more familiar form 
 
-
 }
 
 ```
@@ -223,6 +222,34 @@ Evaluating the model:
 ```{r model1 eval}
 summary(model1_fit)
 plot(model1_fit)
+check_divergences(model1_fit)
 # rstanarm::launch_shinystan(model1_fit)
 
+tmp <- summary(model1_fit)
+
+# convert to a df 
+model1_summary <- summary(model1_fit)$summary %>% 
+  as.data.frame() %>% 
+  mutate(variable = rownames(.)) %>% 
+  select(variable, everything()) %>% 
+  as_tibble()
+
+# pull out just N and plot 
+model1_N <- model1_summary %>% 
+  filter(str_detect(variable,'N\\[')) %>% 
+  separate(variable, c("variable","temp"), sep = "\\[") %>% 
+  separate(temp, c("patch","year_t"), sep=",") %>% 
+  mutate(year_t = str_remove(year_t, '\\]'),
+         year_t = as.numeric(year_t),
+         patch = as.numeric(patch), 
+         lat = patch + min(fluke_lat_time$lat_round) - 1,
+         year = year_t + min(fluke_lat_time$year) - 1)
+
+# plot abundance time-series by patch
+model1_N %>% ggplot(aes(x=year, y=mean)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~lat)
+
 ```
+
