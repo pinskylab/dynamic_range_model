@@ -19,13 +19,16 @@ Useful sources for Bayesian population models and Bayesian implementation in R t
 
 * Stan can't estimate discrete latent variables, so we've moved N from being discrete to continuous
 
-## To-do
+## To-do (short term) 
 
 * Revisit choices of initial values, especially when adding in dimensions over which variables are indexed, which will reduce the total number of individuals in each cell
 * Add random Poisson noise around estimates of N every year (took this out to ensure Stan model was working correctly)
 * Move away from uniform priors (done?)
 * Figure out how to deal with true NAs in data, which are instances with no samples of a patch in a year (not true zeroes, although I've replaced them with zeroes temporarily)
-* make r, lambda0, gamma_rate0, and gamma_shape0 spatially and temporally varying (currently estimated as one parameter)
+* Add stage structure and transition rates 
+* Add in dispersal between patches
+* Replace r (and/or dispersal rates) with temperature-dependent functions
+* Choose data models for all species (currently just modeling fluke) 
 
 ```{r packages}
 library(rstan)
@@ -41,24 +44,18 @@ library(tidyverse)
 library(here)
 #library(MCMCvis)
 
-dogfish <- read_csv(here("processed-data","dogfish_prepped_data.csv"))
+# dogfish <- read_csv(here("processed-data","dogfish_prepped_data.csv"))
 
-dogfishTest <- dogfish %>% 
-  filter(lengthclass=="adult") %>% 
-  group_by(year) %>% 
-  mutate(num_obs = sum(numlengthclass),
-         sd_obs = sd(numlengthclass)) %>% # this is standard deviation of different counts in a year, not of overall abundance over time
-  select(year, num_obs, sd_obs) %>% 
-  distinct()
+# dogfishTest <- dogfish %>% 
+#   filter(lengthclass=="adult") %>% 
+#   group_by(year) %>% 
+#   mutate(num_obs = sum(numlengthclass),
+#          sd_obs = sd(numlengthclass)) %>% # this is standard deviation of different counts in a year, not of overall abundance over time
+#   select(year, num_obs, sd_obs) %>% 
+#   distinct()
 # moving away from spiny dogfish because it is massively overdispersed and no single distribution will be able to produce values at low densities (1, 3, 10...) and at very high densities (5000, 8000, 10000) of dogfish; will eventually need a mixture model, and/or to totally disregard small values and assume everything under some threshold is basically equivalent
 
 fluke <- read_csv(here("processed-data","fluke_prepped_data.csv"))
-
-flukeTest <- fluke %>% 
-  filter(lengthclass=="adult",
-         year>=1972) %>% 
-  group_by(year) %>% 
-  summarise(num_obs = sum(numlengthclass))
 
 fluke_lat_time <- fluke %>% 
   mutate(lat_round = round(lat)) %>% 
@@ -69,6 +66,12 @@ fluke_lat_time <- fluke %>%
   group_by(year, lat_round) %>% 
   summarise(num_obs = sum(numlengthclass)) %>% 
   ungroup()
+
+fluke_train <- fluke_lat_time %>% 
+  filter(year <= 2008)
+
+fluke_test <- fluke_lat_time %>% 
+  filter(year > 2008)
 ```
 
 Here's the stan script: 
@@ -168,13 +171,13 @@ n_chains <-  4
 
 n_cores <- 1
 
-y_array <- reshape2::acast(fluke_lat_time, lat_round~year, value.var="num_obs") # could also do this with pivot_wider
+y_array <- reshape2::acast(fluke_train, lat_round~year, value.var="num_obs") # could also do this with pivot_wider
 y_array <- replace_na(y_array, 0) # DANGER! this is writing over true NAs (years with zero samples in a lat band) with zeroes. I'm doing this here for coding simplicity but need to fix it later.
-z0 <- fluke_lat_time %>% filter(year == min(year)) %>% arrange(lat_round) %>% pull(num_obs)
+z0 <- fluke_train %>% filter(year == min(year)) %>% arrange(lat_round) %>% pull(num_obs)
 
 # starting values from real data 
-dataStan1 <- list(len_t=length(unique(fluke_lat_time$year)),
-                  len_i=length(unique(fluke_lat_time$lat_round)),
+dataStan1 <- list(len_t=length(unique(fluke_train$year)),
+                  len_i=length(unique(fluke_train$lat_round)),
                   y=y_array, # matrix of real pop. sizes; should have dimensions [len_i, len_t]
                   z0=z0, # vector of starting pop. sizes from lowest lat to highest; should have length of len_i
                   sd0=sd(z0) # keep this as a single value for now? also, should it be sd of year 1 or all years? 
