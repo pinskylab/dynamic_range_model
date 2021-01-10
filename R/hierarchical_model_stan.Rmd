@@ -30,6 +30,55 @@ Useful sources for Bayesian population models and Bayesian implementation in R t
 * Replace r (and/or dispersal rates) with temperature-dependent functions
 * Choose data models for all species (currently just modeling fluke) 
 
+## dan's changes
+
+OK, there's a lot going on here. 
+
+- change estimation of N to estimation of process error terms
+
+- basically get rid of population model.... 
+
+What would this ideally look like?
+
+If you're observing total N across all age classes, you could just estimate N in each time step as a random walk / AR processm, where you can set an autocorrelation strength...
+
+So then you can estimate a CV and an autocorrelation
+
+
+```{r}
+sigma_r <- 0.1
+
+p <- .5
+
+y <- 100
+
+rec_dev <- rep(0, y)
+
+rec_dev[1] <- rlnorm(1, -sigma_r ^ 2 / 2, sigma_r)
+
+for (t in 2:y) {
+  rec_dev[t] <-
+    rec_dev[t - 1] * p + rlnorm(1, -sigma_r ^ 2 / 2, sigma_r) * sqrt(1 - p ^ 2)
+}
+
+plot(rec_dev)
+
+```
+So just estimate a vector of recruitemtn deviates with the prior defined as above 
+
+
+and probably simplest to start there since the whole point is to move to stage structure
+
+Once you move to stage structure
+
+1. Recruits ~ rlnorm(-sigma_r^2/2,sigma_r)
+
+2. n_t = n_t-1 * exp(-m)
+
+3. That's it for now
+
+Do you have length or age data? If length, then do their whole transition matrix thingy
+
 ```{r packages}
 library(rstan)
 library(rstanarm)
@@ -72,6 +121,13 @@ fluke_train <- fluke_lat_time %>%
 
 fluke_test <- fluke_lat_time %>% 
   filter(year > 2008)
+
+
+head(fluke_lat_time)
+
+fluke_lat_time %>%
+ggplot(aes(year, num_obs, color = factor(lat_round))) + 
+  geom_point()
 ```
 
 Here's the stan script: 
@@ -161,15 +217,15 @@ for(t in 1:len_t)
 And model implementation from R:
 
 ```{r model1, echo=FALSE, results='hide', message=FALSE, refresh=0}
-warmups <- 1000
+warmups <- 2000
 
-total_iterations <- 20000
+total_iterations <- 4000
 
 max_treedepth <-  10
 
 n_chains <-  4
 
-n_cores <- 1
+n_cores <- 4
 
 y_array <- reshape2::acast(fluke_train, lat_round~year, value.var="num_obs") # could also do this with pivot_wider
 y_array <- replace_na(y_array, 0) # DANGER! this is writing over true NAs (years with zero samples in a lat band) with zeroes. I'm doing this here for coding simplicity but need to fix it later.
