@@ -333,7 +333,7 @@ Posterior predictive projections: basically in the absence of more structure the
 ```{r}
 pp_projected_fluke %>% 
   ggplot() +
-  stat_lineribbon(aes(x = year, y = .value),.width = c(.99, .95, .8, .5), color = "red") +
+  stat_lineribbon(aes(x = year, y = .value),.width = c(.5, 0.9), color = "red") +
   geom_point(data = fluke_test %>% rename(lat = lat_round), aes(year, num_obs), size = 2,alpha = 0.5) + 
   facet_wrap(~lat, scales = "free_y") + 
   scale_fill_brewer()

@@ -121,7 +121,9 @@ for (i in 1:len_i){
     
       if (t == 2){
         
-        rec_dev_proj[i,t-1]  = normal_rng(-pow(sigma_r,2)/2,sigma_r); // generate initial recruitment deviate
+        rec_dev_proj[i,t-1]  = rec_dev[i,len_t - 1]; // initiate projections with last estimated process errors
+      
+        // normal_rng(-pow(sigma_r,2)/2,sigma_r); // generate initial recruitment deviate
         
         } else {
   
