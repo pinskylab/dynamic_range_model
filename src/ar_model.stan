@@ -3,7 +3,6 @@ int<lower=1> len_t; // the number of time points
 
 int<lower=1> len_t_proj; // the number of time points
 
-
 int<lower=1> len_i; // number of patches 
 
 int<lower=0> y[len_i, len_t]; // defining y as an array of integers with patches as rows and years as columns

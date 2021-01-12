@@ -1,0 +1,148 @@
+---
+title: "stage-example"
+author: "Dan Ovando"
+date: "1/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Simulate a population with some mean recruitment with noise, a few ages (assume death after max age, should change to plus-group later)
+
+```{r}
+set.seed(42)
+library(tidyverse)
+library(rstan)
+library(tidybayes)
+library(bayesplot)
+library(ggridges)
+
+patches <- 10
+
+m <- 0.2
+
+stages <- 5
+
+years <- 100
+
+alpha <- 0.5
+
+sigma_r <- 0.2
+
+years <- 20  
+  
+mean_rec <- rlnorm(patches, log(20),1)
+
+hist(mean_rec)
+
+
+no <- mean_rec * matrix(rep(exp(-m * (0:(stages - 1))),patches), nrow = patches, ncol = stages, byrow = TRUE)
+
+# generate data
+
+pop <- array(NA, dim = c(patches, stages, years))
+
+pop[,,1] <- round(no)
+
+for (y in 2:years){
+  
+  pop[,1,y] <- round(mean_rec * exp(rnorm(patches,-sigma_r^2/2, sigma_r))) # add recruits
+  
+  pop[,2:stages,y] <-   round(pop[,1:(stages-1),y-1] * exp(-m))
+  
+}
+
+pop %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as.data.frame() %>% 
+  ggplot(aes(stage, value, color = factor(year))) + 
+  geom_density(stat = "identity") + 
+  facet_wrap(~patch)
+
+pop %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as.data.frame() %>% 
+  ggplot(aes(stage, factor(year),height = value)) + 
+  geom_density_ridges(stat = "identity") + 
+  facet_wrap(~patch)
+
+
+```
+
+
+fit model
+
+```{r}
+
+stage_data <- list(
+  m = m,
+  np = patches,
+  ns = stages,
+  ny = years,
+  n_p_s_y = pop
+)
+
+warmups <- 1000
+
+total_iterations <- 2000
+
+max_treedepth <-  12
+
+n_chains <-  4
+
+n_cores <- 4
+
+
+stage_model_fit <- stan(file = here::here("src","stage_ar_model.stan"),
+           data = stage_data,
+           chains = n_chains,
+           warmup = warmups,
+           iter = total_iterations,
+           cores = n_cores,
+           refresh = 250,
+           control = list(max_treedepth = max_treedepth,
+                          adapt_delta = 0.95))
+
+
+```
+
+Process model
+
+```{r}
+
+
+
+mean_recruits_hat <- tidybayes::gather_draws(stage_model_fit, mean_recruits[patch], n = 1000)
+
+mean_recruits <- tibble(patch = 1:patches, mean_recruits = mean_rec)
+
+mean_recruits %>% 
+  ggplot() + 
+  geom_boxplot(data = mean_recruits_hat, aes(patch, .value, group = patch)) +
+  geom_point(aes(patch, mean_recruits, color = "true"), size = 2) + 
+  scale_y_continuous(name = "Mean Recruits") + 
+  scale_x_continuous(name = "Patch")
+
+
+n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, n_p_s_y_hat[patch, stage,year], n = 1000)
+
+n_p_s_y <- pop %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
+
+eg_patch <- 10
+
+n_p_s_y_hat %>% 
+  filter(patch == eg_patch) %>% 
+  ggplot() +
+   stat_lineribbon(aes(x = stage, y = .value),.width = c(.9, .6)) +
+  geom_point(data = n_p_s_y %>% filter(patch == eg_patch), aes(stage, value, color = "true")) +
+  facet_wrap(~year, scales = "free") + 
+  scale_y_continuous(name = "Numbers") + 
+  labs(caption = glue::glue("for patch {eg_patch}"))
+
+```
+
+
