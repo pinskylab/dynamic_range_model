@@ -2,8 +2,22 @@
 title: "Dynamic range model in Stan"
 author: "Alexa Fredston and Malin Pinsky"
 date: "begun November 2020"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(rstan)
+library(rstanarm)
+library(tidybayes)
+library(bayesplot)
+library(tidyverse)
+library(here)
+
+```
+
 
 ## General notes
 
@@ -45,8 +59,73 @@ If you're observing total N across all age classes, you could just estimate N in
 So then you can estimate a CV and an autocorrelation
 
 
+## stage-prep model
+
+Tried this version, but doesn't really work with just one stage. Once we get multipple stages, can separate out recruitment and mortality. 
+
+here is a suggestion for an alternative model structure. Following the idea here, this is a simplified version with 1 "stage", but can easily be generalized to multiple stages with length transition matrices 
+
+for time *t* and patche *p*, estimate
+
+$$n_{t = 1,p} \sim negbinom(x,sigma_{obs})$$
+
+for future time steps
+
+$$n_{t,p} = n_{t-1,p}e^{-m} + r_{t,p}$$
+
+where *r* is recruits is an AR1 process 
+
+$raw$ are independent recruitment deviates
+
+
+$$raw_t \sim lnorm(-\sigma_r^2/2,\sigma_r)$$
+
+$$r_{t=1,p} = raw_{t=1}$$
+
+and 
+
+
+$$r_{t,p} = \alpha \times r_{t-1,p} +  \sqrt{1 - \alpha^2}\times raw_t)$$
+
+## AR1 Model
+
+To keep is simpler for now, shifting this to just an autoregressive (AR) 1 model, where process error in time step t is potentially correlated with process error in time t - 1. 
+
+This works, and I think lays the foundation for 
+
+for time *t* and patche *p*, estimate
+
+$$n_{t = 1,p} \sim negbinom(x,sigma_{obs})$$
+
+for future time steps
+
+$$n_{t,p} = n_{t-1,p}e^{r_{t,p}}$$
+
+where *r* is is an AR1 process error term
+
+$raw$ are independent recruitment deviates
+
+
+$$raw_t \sim norm(-\sigma_r^2/2,\sigma_r)$$
+
+$$r_{t=1,p} = raw_{t=1,p}$$
+
+and 
+
+$$r_{t,p} = -\sigma_r^2/2 + \alpha \times  (r_{t - 1,p} - -\sigma_r^2/2) + raw_{t=1,p}$$
+
+and 
+
+$$\sigma_{obs} \sim normal(0.75, 0.25)$$
+
+$$\sigma_r \sim normal(.5,.25)$$
+$$\alpha \sim normal(0,.25)$$
+
+From there, we generate posterior predictive to the fits, and then use the posterior predictive to generate the predictions for the future, where now we generate both process error and observation error for the projected time steps 
+
+
 ```{r}
-sigma_r <- 0.1
+sigma_r <- 0.2
 
 p <- .5
 
@@ -67,30 +146,12 @@ plot(rec_dev)
 So just estimate a vector of recruitemtn deviates with the prior defined as above 
 
 
-and probably simplest to start there since the whole point is to move to stage structure
 
-Once you move to stage structure
-
-1. Recruits ~ rlnorm(-sigma_r^2/2,sigma_r)
-
-2. n_t = n_t-1 * exp(-m)
-
-3. That's it for now
-
-Do you have length or age data? If length, then do their whole transition matrix thingy
-
-```{r packages}
-library(rstan)
-library(rstanarm)
-library(tidybayes)
-library(bayesplot)
-```
 
 
 ```{r data, eval=TRUE}
 #library(rjags)
-library(tidyverse)
-library(here)
+
 #library(MCMCvis)
 
 # dogfish <- read_csv(here("processed-data","dogfish_prepped_data.csv"))
@@ -109,117 +170,40 @@ fluke <- read_csv(here("processed-data","fluke_prepped_data.csv"))
 fluke_lat_time <- fluke %>% 
   mutate(lat_round = round(lat)) %>% 
   filter(lengthclass=="adult",
-         year>=1972,
-         lat_round >= 34 # because we're just using nefsc survey for now, which rarely goes below 34N
+         year>=1973,
+         lat_round >= 34,
+         lat_round < 43 # because we're just using nefsc survey for now, which rarely goes below 34N
          ) %>% 
   group_by(year, lat_round) %>% 
   summarise(num_obs = sum(numlengthclass)) %>% 
   ungroup()
 
 fluke_train <- fluke_lat_time %>% 
-  filter(year <= 2008)
+  filter(year <= 2012)
 
 fluke_test <- fluke_lat_time %>% 
-  filter(year > 2008)
+  filter(year > 2012)
 
 
 head(fluke_lat_time)
 
 fluke_lat_time %>%
 ggplot(aes(year, num_obs, color = factor(lat_round))) + 
-  geom_point()
-```
+  geom_point() + 
+  facet_wrap(~lat_round, scales = "free_y")
 
-Here's the stan script: 
 
-```{stan, output.var="model1"}
-
-data{
-int<lower=1> len_t; // the number of time points
-int<lower=0> len_i; // number of patches 
-
-int<lower=0> y[len_i, len_t]; // defining y as an array of integers with patches as rows and years as columns
-
-// data inputs
-vector<lower=0>[len_i] z0; // vector of starting pop. values, one per patch 
-real<lower=0> sd0; // scalar
-} 
-
-//transformed data{
-//}
-
-parameters{ 
-real<lower=0> r; // intrinsic pop growth rate
-real<lower=0, upper=100000> K; // carrying capacity
-real<lower=0> sigma_process; 
-real<lower=0> phi_obs; 
-
-real<lower=0> N[len_i,len_t]; // array of population size--should be discrete (integer values), but Stan can't estimate latent discrete variables, so we're estimating it as continuous here 
-vector<lower=0>[len_i] lambda0; // Ricker growth parameter at time step 1
-vector<lower=1e3, upper=1e7>[len_i] gamma_shape0; // gamma parameter for process model at time step 1 - manually setting range
-vector<lower=1, upper=1e3>[len_i] gamma_rate0; // gamma parameter for process model at time step 1 - manually setting range
-
-} 
-
-transformed parameters {
-real<lower=0> lambda[len_i,len_t];
-real<lower=0> gamma_shape[len_i,len_t]; 
-real<lower=0> gamma_rate[len_i,len_t];
-
-for(i in 1:len_i){
-  lambda[i,1] = lambda0[i]; // assigning patches all the same initial values for now
-  gamma_shape[i,1] = gamma_shape0[i];
-  gamma_rate[i,1] = gamma_rate0[i];
-
-}
-
-for(t in 2:len_t){
-  for(i in 1:len_i){
-    lambda[i,t] = N[i,t-1] * exp(r - r * N[i,t-1] / K); 
-    gamma_shape[i,t] = (lambda[i,t]^2) / (sigma_process^2);
-    gamma_rate[i,t] = lambda[i,t] / (sigma_process^2);
-}}
-}
-
-model{
-
-// uniforms not strictly necessary if the bounds are appropriately declared in 
-// the parameters block -- keeping for now as dists may change
-K ~ uniform(100, 10000);
-sigma_process ~ uniform(0, 500); //can we constrain this more?
-
-r ~ normal(1, 1);
-phi_obs ~ normal(0.75, 0.25); // from https://mc-stan.org/docs/2_20/functions-reference/nbalt.html  phi = mu^2 / (sigma^2-mu)
-
-// define initial values of time-varying latent variables 
-for(i in 1:len_i){
-  N[i,1] ~ gamma((z0[i]^2/sd0^2),(z0[i]/sd0^2));
-  lambda0[i] ~ gamma((z0[i]^2/sd0^2),(z0[i]/sd0^2));
-  gamma_shape0[i] ~ uniform(1e3, 1e7);
-  gamma_rate0[i] ~ uniform(1, 1000);
-}
-
-//define later values of N (other quantities are defined, not estimated, after the first value)
-for(t in 2:len_t){
-  for(i in 1:len_i){
-N[i,t] ~ gamma(gamma_shape[i,t], gamma_rate[i,t]);  
-}}
-
-// observation model
-for(t in 1:len_t) 
-  for(i in 1:len_i)
-    y[i,t] ~ neg_binomial_2(N[i,t], phi_obs); // this version of neg binom has a more familiar form 
-
-}
-
+fluke_lat_time %>%
+ggplot(aes(num_obs)) + 
+  geom_histogram()
 ```
 
 And model implementation from R:
 
-```{r model1, echo=FALSE, results='hide', message=FALSE, refresh=0}
-warmups <- 2000
+```{r model1, echo=FALSE, results='hide', message=FALSE, refresh=0, include=FALSE}
+warmups <- 2500
 
-total_iterations <- 4000
+total_iterations <- 5000
 
 max_treedepth <-  10
 
@@ -231,12 +215,16 @@ y_array <- reshape2::acast(fluke_train, lat_round~year, value.var="num_obs") # c
 y_array <- replace_na(y_array, 0) # DANGER! this is writing over true NAs (years with zero samples in a lat band) with zeroes. I'm doing this here for coding simplicity but need to fix it later.
 z0 <- fluke_train %>% filter(year == min(year)) %>% arrange(lat_round) %>% pull(num_obs)
 
+proj_init <- fluke_test %>% filter(year == min(year)) %>% arrange(lat_round) %>% pull(num_obs)
+
+
 # starting values from real data 
 dataStan1 <- list(len_t=length(unique(fluke_train$year)),
                   len_i=length(unique(fluke_train$lat_round)),
                   y=y_array, # matrix of real pop. sizes; should have dimensions [len_i, len_t]
-                  z0=z0, # vector of starting pop. sizes from lowest lat to highest; should have length of len_i
-                  sd0=sd(z0) # keep this as a single value for now? also, should it be sd of year 1 or all years? 
+                  z0=z0 + 1e-3,# vector of starting pop. sizes from lowest lat to highest; should have length of len_i
+                  len_t_proj = n_distinct(fluke_test$year),
+                  proj_init = proj_init + 1e-3
 )
 
 ## DANGER! replacing 0s with 1s here just so gamma will work, but we are writing over the real data!
@@ -262,16 +250,30 @@ for(i in 1:n_chains) {
     K=Kinit
   )
 }
+# 
+# model1_fit <- # stan(file = here::here("R","model1.stan"),
+#   sampling(model1,
+#            data = dataStan1,
+#            chains = n_chains,
+#            warmup = warmups,
+#            iter = total_iterations,
+#            cores = n_cores,
+#            refresh = 250,
+#            control = list(max_treedepth = max_treedepth,
+#                           adapt_delta = 0.95))
 
-model1_fit <- # stan(file = here::here("R","model1.stan"),
-  sampling(model1,
+
+inits <- map(1:n_chains, ~ list(phi_obs = rlnorm(1, mean=log(0.75),
+                   sd=0.25)))
+
+model1_fit <- stan(file = here::here("src","ar_model.stan"),
            data = dataStan1,
            chains = n_chains,
            warmup = warmups,
            iter = total_iterations,
            cores = n_cores,
+           init = inits,
            refresh = 250,
-           init = initStan1,
            control = list(max_treedepth = max_treedepth,
                           adapt_delta = 0.95))
 ```
@@ -279,37 +281,68 @@ model1_fit <- # stan(file = here::here("R","model1.stan"),
 Evaluating the model:
 
 ```{r model1 eval}
-summary(model1_fit)
-plot(model1_fit)
-check_divergences(model1_fit)
+# summary(model1_fit)
+# plot(model1_fit)
+# check_divergences(model1_fit)
 # rstanarm::launch_shinystan(model1_fit)
 
 # convert to a df 
-model1_summary <- summary(model1_fit)$summary %>% 
-  as.data.frame() %>% 
-  mutate(variable = rownames(.)) %>% 
-  select(variable, everything()) %>% 
-  as_tibble()
 
-# pull out just N and plot 
-model1_N <- model1_summary %>% 
-  filter(str_detect(variable,'N\\[')) %>% 
-  separate(variable, c("variable","temp"), sep = "\\[") %>% 
-  separate(temp, c("patch","year_t"), sep=",") %>% 
-  mutate(year_t = str_remove(year_t, '\\]'),
-         year_t = as.numeric(year_t),
-         patch = as.numeric(patch), 
+
+predicted_fluke <- tidybayes::gather_draws(model1_fit,y_hat[patch,year], n = 1000) %>% 
+         mutate(patch = as.numeric(patch), 
          lat = patch + min(fluke_lat_time$lat_round) - 1,
-         year = year_t + min(fluke_lat_time$year) - 1)
+         year = year + min(fluke_lat_time$year) - 1) 
+
+pp_predicted_fluke <- tidybayes::gather_draws(model1_fit,pp_y_hat[patch,year], n = 1000) %>% 
+         mutate(patch = as.numeric(patch), 
+         lat = patch + min(fluke_lat_time$lat_round) - 1,
+         year = year + min(fluke_lat_time$year) - 1) 
+
+pp_projected_fluke <- tidybayes::gather_draws(model1_fit,pp_proj_y_hat[patch,year], n = 1000) %>% 
+         mutate(patch = as.numeric(patch), 
+         lat = patch + min(fluke_lat_time$lat_round) - 1,
+         year = year + min(fluke_test$year) - 1) 
 ```
 
 ```{r model1 plot}
-
-# plot abundance time-series by patch
-model1_N %>% ggplot(aes(x=year, y=mean)) +
-  geom_point() +
-  geom_line() +
-  facet_wrap(~lat)
+predicted_fluke %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = fluke_train %>% rename(lat = lat_round), aes(year, num_obs), size = 2,alpha = 0.5) + 
+  facet_wrap(~lat, scales = "free_y") + 
+  scale_fill_brewer()
 
 ```
+
+
+ Posterior predictive fits
+ 
+ 
+```{r}
+pp_predicted_fluke %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = fluke_train %>% rename(lat = lat_round), aes(year, num_obs), size = 2,alpha = 0.5) + 
+  facet_wrap(~lat, scales = "free_y") + 
+  scale_fill_brewer()
+```
+
+Posterior predictive projections: basically in the absence of more structure the AR1 process is useless after about 4 years, but it's a start
+
+```{r}
+pp_projected_fluke %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value),.width = c(.5, 0.9), color = "red") +
+  geom_point(data = fluke_test %>% rename(lat = lat_round), aes(year, num_obs), size = 2,alpha = 0.5) + 
+  facet_wrap(~lat, scales = "free_y") + 
+  scale_fill_brewer()
+```
+
+
+
+```{r}
+plot(model1_fit, pars = c("alpha","sigma_r"))
+```
+
 
