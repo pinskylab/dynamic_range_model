@@ -8,3 +8,5 @@
 python/lib/
 python/include/
 python/bin/
+*.jpg
+old/
