@@ -36,6 +36,16 @@ fluke_patch_stage_year <- fluke %>%
   rename(patch = lat_round,
          stage = lengthclass)
 
+patch_counts <- fluke_patch_stage_year %>% 
+  filter(stage == "smalljuv") %>% 
+  group_by(patch) %>% 
+  summarise(lifetime_n = sum(num_obs)) %>% 
+  ungroup() %>% 
+  filter(lifetime_n > 0)
+
+fluke_patch_stage_year <- fluke_patch_stage_year %>% 
+  filter(patch %in% patch_counts$patch)
+
 fluke_train <- fluke_patch_stage_year %>% 
   filter(year <= 2008)
 
@@ -94,7 +104,7 @@ stage_data <- list(
   np = patches,
   ns = stages,
   ny = years,
-  n_p_s_y = pop
+  n_p_s_y = pop + 100
 )
 
 warmups <- 1000
@@ -103,9 +113,9 @@ total_iterations <- 2000
 
 max_treedepth <-  12
 
-n_chains <-  4
+n_chains <-  1
 
-n_cores <- 4
+n_cores <- 1
 
 inits <- list()
 inits <- for(i in n_chains) {
@@ -125,7 +135,6 @@ inits <- for(i in n_chains) {
 # what's the intuition behind not providing inits?
 stage_model_fit <- stan(file = here::here("src","stage_ar_model.stan"),
                         data = stage_data,
-                        init = inits,
                         chains = n_chains,
                         warmup = warmups,
                         iter = total_iterations,
@@ -145,32 +154,50 @@ Process model
 
 mean_recruits_hat <- tidybayes::gather_draws(stage_model_fit, mean_recruits[patch], n = 1000)
 
-mean_recruits <- tibble(patch = 1:patches, mean_recruits = mean_rec)
+# mean_recruits <- tibble(patch = 1:patches, mean_recruits = mean_rec)
 
-mean_recruits %>% 
+mean_recruits_hat %>% 
   ggplot() + 
   geom_boxplot(data = mean_recruits_hat, aes(patch, .value, group = patch)) +
-  geom_point(aes(patch, mean_recruits, color = "true"), size = 2) + 
+  # geom_point(aes(patch, mean_recruits, color = "true"), size = 2) + 
   scale_y_continuous(name = "Mean Recruits") + 
   scale_x_continuous(name = "Patch")
 
 
 n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, n_p_s_y_hat[patch, stage,year], n = 1000)
-
 n_p_s_y <- pop %>% 
   reshape::melt(varnames = c("patch","stage","year")) %>% 
-  as_tibble() 
+  as_tibble() %>% 
+  mutate(stage = case_when(stage == "smalljuv" ~ 1, stage == "largejuv" ~ 2, TRUE ~ 3)) %>% 
+  mutate(patch = as.numeric(as.factor(patch)))
 
-eg_patch <- 10
+n_p_s_y_hat <-  n_p_s_y_hat %>% 
+  mutate(year = min(n_p_s_y$year) - 1 + year)
+
+eg_patch <- 2
 
 n_p_s_y_hat %>% 
-  filter(patch == eg_patch) %>% 
+  filter(patch == eg_patch, year > 2005) %>% 
   ggplot() +
   stat_lineribbon(aes(x = stage, y = .value),.width = c(.9, .6)) +
-  geom_point(data = n_p_s_y %>% filter(patch == eg_patch), aes(stage, value, color = "true")) +
+  geom_point(data = n_p_s_y %>% filter(patch == eg_patch, year > 2005), aes(stage, value, color = "true")) +
   facet_wrap(~year, scales = "free") + 
   scale_y_continuous(name = "Numbers") + 
   labs(caption = glue::glue("for patch {eg_patch}"))
+
+
+tmp <- n_p_s_y %>% 
+  group_by(patch, year) %>% 
+  summarise(value = sum(value))
+
+n_p_s_y_hat %>% 
+  filter(year > 2000) %>% 
+  group_by(patch, year, .draw) %>% 
+  summarise(.value = sum(.value)) %>% 
+  ggplot() +
+  geom_point(data = tmp, aes(year, value, color = "observed")) +
+  stat_lineribbon(aes(x = year, y = .value),.width = c(.9, .6)) +
+  facet_wrap(~patch)
 
 ```
 

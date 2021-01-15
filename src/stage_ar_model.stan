@@ -26,7 +26,7 @@ parameters{
   
   matrix[np,ny-1] raw; // array of raw recruitment deviates
   
-  real<lower = 1e-6> sigma_obs;
+  real<lower = 1e-3> sigma_obs;
   
 }
 
@@ -84,6 +84,14 @@ model {
   alpha ~ normal(0,.25); // autocorrelation prior
   
   sigma_obs ~ normal(0.75, 0.25);
+//   
+//   print("n_p_s_y is ", n_p_s_y_hat[12,1:ns,2]);
+//   
+//     print("rec_dev is ", rec_dev[12,1]);
+// 
+//   
+// print("mean recruits are ", mean_recruits[12]);
+
   
   for(y in 2:ny) {
     
@@ -91,10 +99,19 @@ model {
       
       raw[p,y-1] ~ normal(0,sigma_r); // prior on raw process error
       
-      n_p_s_y[p,1:ns,y] ~ multinomial(to_vector(n_p_s_y_hat[p,1:ns,y]) / sum(to_vector(n_p_s_y_hat[p,1:ns,y]))); // fit to proportions at age by patch AF: this shouldn't have an issue with zeros (?) -- also why not define this as 2:ns? 
+      if (sum(n_p_s_y_hat[p,1:ns,y]) > 0){
+        
+        // print("hmm",min(n_p_s_y[p,1:ns,y]));
+        // // 
+        // print("hmm 2 ", sum(to_vector(n_p_s_y_hat[p,1:ns,y])));
+        // 
+              n_p_s_y[p,1:ns,y] ~ multinomial((to_vector(n_p_s_y_hat[p,1:ns,y])) / sum(to_vector(n_p_s_y_hat[p,1:ns,y]))); // fit to proportions at age by patch AF: this shouldn't have an issue with zeros (?) -- also why not define this as 2:ns?
+      } // only evaluate length comps if there are length comps to evaluate
       
-      n_p_s_y[p,1,y] ~ neg_binomial_2(n_p_s_y_hat[p,1,y], sigma_obs); // fit to mean number of recruits per patch // AF: negative binomial should also be fine with zeros! also, shouldn't sigma_obs be estimated from variance in all the counts, not just smalljuv? there are very few of those and we want a realistic estimate of sigma_obs that we can apply to adults / largejuvs too. maybe we need to move towards estimating sigma_obs by life stage...? 
+
       
+      n_p_s_y[p,1,y] ~ neg_binomial_2(n_p_s_y_hat[p,1,y], sigma_obs); // fit to mean number of recruits per patch // AF: negative binomial should also be fine with zeros! also, shouldn't sigma_obs be estimated from variance in all the counts, not just smalljuv? there are very few of those and we want a realistic estimate of sigma_obs that we can apply to adults / largejuvs too. maybe we need to move towards estimating sigma_obs by life stage...?
+
       
     } // close patch loop
     
