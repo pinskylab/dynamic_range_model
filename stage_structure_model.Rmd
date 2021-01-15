@@ -113,9 +113,9 @@ total_iterations <- 2000
 
 max_treedepth <-  12
 
-n_chains <-  4
+n_chains <-  1
 
-n_cores <- 4
+n_cores <- 1
 
 
 # what's the intuition behind not providing inits?
@@ -166,7 +166,7 @@ n_p_s_y_hat %>%
   filter(patch == eg_patch, year > 2005) %>% 
   ggplot() +
   stat_lineribbon(aes(x = stage, y = .value),.width = c(.9, .6)) +
-  geom_point(data = n_p_s_y %>% filter(patch == eg_patch, year > 2005), aes(stage, value, color = "true")) +
+  geom_point(data = n_p_s_y %>% filter(patch == eg_patch, year > 2005), aes(stage, value + 100, color = "true")) +
   facet_wrap(~year, scales = "free") + 
   scale_y_continuous(name = "Numbers") + 
   labs(caption = glue::glue("for patch {eg_patch}"))
