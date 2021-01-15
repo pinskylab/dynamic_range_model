@@ -1,0 +1,177 @@
+---
+title: "stage-example"
+author: "Dan Ovando"
+date: "1/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Simulate a population with some mean recruitment with noise, a few ages (assume death after max age, should change to plus-group later)
+
+```{r}
+set.seed(42)
+library(tidyverse)
+library(rstan)
+library(tidybayes)
+library(bayesplot)
+library(ggridges)
+library(here)
+library(reshape2)
+
+fluke <- read_csv(here("processed-data","fluke_prepped_data.csv"))
+
+fluke_patch_stage_year <- fluke %>% 
+  mutate(lat_round = round(lat)) %>% 
+  filter(year>=1972,
+         lat_round >= 34 # because we're just using nefsc survey for now, which rarely goes below 34N
+  ) %>% 
+  group_by(year, lat_round, lengthclass) %>% # now grouping by stage too
+  summarise(num_obs = sum(numlengthclass)) %>% 
+  ungroup() %>% 
+  mutate(lengthclass = factor(lengthclass, levels=c('smalljuv','largejuv','adult'))) %>% # tidying up for creating data array below
+  arrange(lat_round, year) %>% 
+  rename(patch = lat_round,
+         stage = lengthclass)
+
+fluke_train <- fluke_patch_stage_year %>% 
+  filter(year <= 2008)
+
+fluke_test <- fluke_patch_stage_year %>% 
+  filter(year > 2008)
+
+patches <- length(unique(fluke_train$patch))
+patches_vec <- unique(fluke_train$patch)
+
+m <- 0.2
+
+stages <- length(unique(fluke_train$stage))
+stages_vec <- unique(fluke_train$stage)
+
+years <- length(unique(fluke_train$year))
+years_vec <- unique(fluke_train$year)
+years_proj <- unique(fluke_test$year)
+
+alpha <- 0.5
+
+sigma_r <- 0.2
+
+# here we diverge from stage-example by using the real data instead of simulated data
+
+# create array of data for fluke
+pop <- acast(fluke_train, patch ~ stage ~ year, value.var = "num_obs")
+pop <- replace_na(pop, 0) # DANGER! we're writing over real NAs here with zeros, because stan can't cope with NAs, but we need to fix this eventually (the NAs represent unsampled patches)
+
+dim(pop) == c(patches, stages, years) # confirm same dims
+
+# not sure why these plots aren't working...
+# pop %>% 
+#   reshape::melt(varnames = c("patch","stage","year")) %>% 
+#   as.data.frame() %>% 
+#   ggplot(aes(stage, value, color = factor(year))) + 
+#   geom_density(stat = "identity") + 
+#   facet_wrap(~patch)
+# 
+# pop %>% 
+#   reshape::melt(varnames = c("patch","stage","year")) %>% 
+#   as.data.frame() %>% 
+#   ggplot(aes(stage, factor(year),height = value)) + 
+#   geom_density_ridges(stat = "identity") + 
+#   facet_wrap(~patch)
+
+
+```
+
+
+fit model
+
+```{r}
+
+stage_data <- list(
+  m = m,
+  np = patches,
+  ns = stages,
+  ny = years,
+  n_p_s_y = pop
+)
+
+warmups <- 1000
+
+total_iterations <- 2000
+
+max_treedepth <-  12
+
+n_chains <-  4
+
+n_cores <- 4
+
+inits <- list()
+inits <- for(i in n_chains) {
+  log_sigma_r_init = rnorm(1, log(.5),.1)
+  alpha_init = rnorm(1, 0, 0.25)
+  raw_init = matrix(data = rnorm(patches * (years-1), 0, exp(log_sigma_r_init)), nrow = patches, ncol = (years-1))
+  sigma_obs_init = rnorm(1, 0.75, 0.25)
+   # this isn't working in a for loop, I have no idea why 
+  inits[[i]] <- list(
+    log_sigma_r = log_sigma_r_init,
+    alpha = alpha_init,
+    raw = raw_init,
+    sigma_obs = sigma_obs_init
+    )
+}
+
+# what's the intuition behind not providing inits?
+stage_model_fit <- stan(file = here::here("src","stage_ar_model.stan"),
+                        data = stage_data,
+                        init = inits,
+                        chains = n_chains,
+                        warmup = warmups,
+                        iter = total_iterations,
+                        cores = n_cores,
+                        refresh = 250,
+                        control = list(max_treedepth = max_treedepth,
+                                       adapt_delta = 0.95))
+
+
+```
+
+Process model
+
+```{r}
+
+
+
+mean_recruits_hat <- tidybayes::gather_draws(stage_model_fit, mean_recruits[patch], n = 1000)
+
+mean_recruits <- tibble(patch = 1:patches, mean_recruits = mean_rec)
+
+mean_recruits %>% 
+  ggplot() + 
+  geom_boxplot(data = mean_recruits_hat, aes(patch, .value, group = patch)) +
+  geom_point(aes(patch, mean_recruits, color = "true"), size = 2) + 
+  scale_y_continuous(name = "Mean Recruits") + 
+  scale_x_continuous(name = "Patch")
+
+
+n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, n_p_s_y_hat[patch, stage,year], n = 1000)
+
+n_p_s_y <- pop %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
+
+eg_patch <- 10
+
+n_p_s_y_hat %>% 
+  filter(patch == eg_patch) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = stage, y = .value),.width = c(.9, .6)) +
+  geom_point(data = n_p_s_y %>% filter(patch == eg_patch), aes(stage, value, color = "true")) +
+  facet_wrap(~year, scales = "free") + 
+  scale_y_continuous(name = "Numbers") + 
+  labs(caption = glue::glue("for patch {eg_patch}"))
+
+```
+
+
