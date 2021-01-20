@@ -9,6 +9,10 @@ data {
   
   int n_p_s_y[np,ns,ny]; // array of numbers at patch, stage, and year 
   
+  int proj_init[np,ns,1]; // array of initial states for the future projections
+  
+  int ny_proj; // number of years to forecast 
+  
 }
 
 transformed data{
@@ -38,7 +42,7 @@ transformed parameters{
   
   real n_p_s_y_hat [np,ns,ny]; // array of numbers at patch, stage, and year 
   
-  matrix[np,ny-1] rec_dev; // array of realized recruitment deviates
+  matrix[np,ny-1] rec_dev; // array of realized recruitment deviates 
   
   sigma_r = exp(log_sigma_r);
   
@@ -123,18 +127,61 @@ model {
 
 generated quantities{
   
-//  int pp_n_p_s_y_hat[np,ns,ny];
-  
+real pp_n_p_s_y_hat[np, ns, ny_proj];
+
+real raw_proj[np, ny_proj - 1]; // why are these one year shorter?
+
+real rec_dev_proj[np, ny_proj - 1];
+
+pp_n_p_s_y_hat[1:np, 1:ns, 1] = n_p_s_y_hat[1:np,1:ns,1]; // initialize with starting pop
+
   // generate posterior predictives for training data
   
-//  for(p in 1:np){
-//    for(s in 1:ns){
-//for(y in 1:ny){
-//           pp_n_p_s_y_hat[p,s,y] =  multinomial_rng(to_vector(n_p_s_y_hat[p,1:ns,y]) / sum(to_vector//(n_p_s_y_hat[p,1:ns,y]))); 
+for(p in 1:np){
+  for(s in 1:ns){
+    for(y in 2:ny){
+           pp_n_p_s_y_hat[p,s,y] =  multinomial_rng(to_vector(n_p_s_y_hat[p,1:ns,y]) / sum(to_vector(n_p_s_y_hat[p,1:ns,y])));  // the 1:ns syntax makes it a proportion over all stages
+           // getting an error here because multinomial requires integers and we made npsyhat a real array
 
- //     }
- //   }
-//  }
+      }
+    }
+  }
   
+  // generate posterior predictives for the testing data
+
+for(p in 1:np){
+  for(s in 1:ns){
+    pp_proj_n_p_s_y_hat[p,s,1] = proj_init[p,s,1]; // initiate projection with fixed observation
+  }
+}
+
+// project recruitment deviates into the future
+for(p in 1:np){
+    for(y in 2:ny_proj){
+      
+      if (y == 2){
+        rec_dev_proj[p, y-1]  = rec_dev[p, y-1]; // initiate projections with last estimated process errors 
+      }
+      else{
+          rec_dev_proj[p, y-1] = -pow(sigma_r,2)/2 + alpha *  (rec_dev_proj[p, y-2] - -pow(sigma_r,2)/2) + normal_rng(-pow(sigma_r,2)/2,sigma_r); // generate autoregressive recruitment deviates
+        
+      }
+    }
+}
+
+// separate loop for projecting pop because we added stage structure 
+
+for(p in 1:np){
+  for(n in 1:ns){
+    for(y in 2:ny_proj){
+      
+      tmp = pp_proj_n_p_s_y_hat[p, s, y] * exp(rec_dev_proj[p, y-1]) + 1; // calculate population in each patch and stage
+      
+      pp_proj_n_p_s_y_hat[p, s, y] = multinomial_rng(to_vector(tmp[p, s, y]) / sum(to_vector(tmp[p, s, y]))); // is it OK that this is also calculating stage 1?
+      
+    }
+  }
+}
+      
 }
 
