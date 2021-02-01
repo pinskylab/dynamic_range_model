@@ -227,6 +227,198 @@ pop_spilldf %>%
   scale_color_manual(values=c('blue','deeppink','cyan'))
 ```
 
+Adding temperature dependence
+
+* Autoregressive recruitment process
+* Change in classes 2 and 3 now a result of mortality and growth from previous stage (growth is now temperature dependent) 
+* Adults accumulate (keep adults from last year less the same mortality rate as used for other stages)
+* 10% of adults move to adjacent patches every year (passive spillover) 
+
+```{r sim-ar-T-dep-growth}
+
+width <- 5 # sensitivity to temperature variation 
+
+sstopt <- 18 # temp at which growth is maximized
+
+growth <- function(sst) {exp(-0.5 * ((sst - sstopt)/width)^2)}
+
+spill <- 0.1
+
+sst <- array(NA, dim = c(patches, years))
+gY <- array(NA, dim = c(patches, years))
+gA <- array(NA, dim = c(patches, years))
+tmp <- sort(1:patches, decreasing=TRUE) # flip order so the highest sst is at the lowest patches (representing lat)
+
+for(p in 1:patches){
+  for(y in 1:years){
+    sst[p, y] <- rnorm(n=1, mean=(tmp[p]+10), sd=3) # adding vaguely realistic SSTs for the mid-Atlantic
+    gY[p, y] <- growth(sst[p, y]) # calculate array of growth rates 
+    gA[p, y] <- growth(sst[p, y])
+    
+  }
+}
+
+pop_Tgrowth <- array(NA, dim = c(patches, stages, years))
+
+pop_Tgrowth[,,1] <- round(n0) # initialize first year  
+
+for (y in 2:years){
+  for(p in 1:patches) {
+    # recruits
+    pop_Tgrowth[,1,y] <- round(mean_rec * exp(rnorm(patches,-sigma_r^2/2, sigma_r)))
+    
+    # young adults / large juvs
+    pop_Tgrowth[p,2,y] <- round(pop_Tgrowth[p,1,y-1] * (1 - m) * gY[p, y-1]) + # recruits, less mortality, plus growth into this stage
+      round(pop_Tgrowth[p,2,y-1] * (1 - m) * (1 - gA[p, y-1])) # this life stage last year less individuals that died or grew out 
+    
+    # adults
+    
+    # add reflecting cases for edge patches
+    if(p == 1) {
+      pop_Tgrowth[p,3,y] <- round(pop_Tgrowth[p,2,y-1] * (1 - m) * gA[p, y-1]) + # young adults in patch
+        round(pop_Tgrowth[p,3,y-1] * (1 - m) * (1 - spill)) + # adults in patch, minus mortality and spillover (only to one patch)
+        round(pop_Tgrowth[p+1,3,y-1] * (1 - m) * spill) # and patch above
+    }
+    
+    else if(p == patches) {
+      pop_Tgrowth[p,3,y] <- round(pop_Tgrowth[p,2,y-1] * (1 - m) * gA[p, y-1]) + # young adults in patch
+        round(pop_Tgrowth[p,3,y-1] * (1 - m) * (1 - spill)) + # adults in patch, minus mortality and spillover (only to one patch)
+        round(pop_Tgrowth[p-1,3,y-1] * (1 - m) * spill) # and patch below
+    }
+    
+    else{
+      pop_Tgrowth[p,3,y] <- round(pop_Tgrowth[p,2,y-1] * (1 - m) * gA[p, y-1]) + # young adults in patch
+        round(pop_Tgrowth[p,3,y-1] * (1 - m) * (1 - 2*spill)) + # adults in patch, minus mortality and spillover x2
+        round(pop_Tgrowth[p-1,3,y-1] * (1 - m) * spill) + # add dispersal from patch below
+        round(pop_Tgrowth[p+1,3,y-1] * (1 - m) * spill) # and patch above
+    }
+  }
+}
+
+pop_Tgrowthdf <- pop_Tgrowth %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as.data.frame() %>% 
+  mutate(stage = factor(stage))
+
+# plot lat temp gradient
+
+sst %>% 
+  reshape::melt(varnames=c("patch","year")) %>% 
+  ggplot(aes(x=year, y=value, color=value)) + 
+  facet_wrap(~patch) + 
+  geom_line()+
+  labs(y="sst")
+
+pop_Tgrowthdf %>% 
+  ggplot(aes(x=year, y=value, color=stage)) + 
+  geom_line() + 
+  facet_wrap(~patch) +
+  theme_bw() +
+  scale_color_manual(values=c('blue','deeppink','cyan'))+
+  labs(y="abundance")
+```
+
+Adding climate change
+
+* Autoregressive recruitment process
+* Change in classes 2 and 3 now a result of mortality and growth from previous stage (growth is now temperature dependent) 
+* Adults accumulate (keep adults from last year less the same mortality rate as used for other stages)
+* 10% of adults move to adjacent patches every year (passive spillover) 
+* After 50 years, temperature starts increasing everywhere
+
+```{r sim-ar-CC}
+
+width <- 4 # sensitivity to temperature variation 
+
+sstopt <- 18 # temp at which growth is maximized
+
+growth <- function(sst) {exp(-0.5 * ((sst - sstopt)/width)^2)}
+
+spill <- 0.1
+
+sst <- array(NA, dim = c(patches, years))
+gY <- array(NA, dim = c(patches, years))
+gA <- array(NA, dim = c(patches, years))
+
+tmp <- sort(1:patches, decreasing=TRUE) # flip order so the highest sst is at the lowest patches (representing lat)
+for(p in 1:patches){
+  for(y in 1:years){
+    
+    if(y < 50){
+      sst[p, y] <- rnorm(n=1, mean=(tmp[p]+10), sd=3)
+    } # adding vaguely realistic SSTs for the mid-Atlantic
+    
+    else{
+      sst[p, y] <- rnorm(n=1, mean=(tmp[p]+10), sd=3)*exp(y / 200) # adding warming; rescaling exponent to something sane
+    }
+    gY[p, y] <- growth(sst[p, y]) # calculate array of growth rates 
+    gA[p, y] <- growth(sst[p, y]) 
+  }
+}
+
+pop_cc <- array(NA, dim = c(patches, stages, years))
+
+pop_cc[,,1] <- round(n0) # initialize first year  
+
+for (y in 2:years){
+  for(p in 1:patches) {
+    # recruits
+    pop_cc[,1,y] <- round(mean_rec * exp(rnorm(patches,-sigma_r^2/2, sigma_r)))
+    
+    # young adults / large juvs
+    pop_cc[p,2,y] <- round(pop_cc[p,1,y-1] * (1 - m) * gY[p, y-1]) + # recruits, less mortality, plus growth into this stage
+      round(pop_cc[p,2,y-1] * (1 - m) * (1 - gA[p, y-1])) # this life stage last year less individuals that died or grew out 
+    
+    # adults
+    
+    # add reflecting cases for edge patches
+    if(p == 1) {
+      pop_cc[p,3,y] <- round(pop_cc[p,2,y-1] * (1 - m) * gA[p, y-1]) + # young adults in patch
+        round(pop_cc[p,3,y-1] * (1 - m) * (1 - spill)) + # adults in patch, minus mortality and spillover (only to one patch)
+        round(pop_cc[p+1,3,y-1] * (1 - m) * spill) # and patch above
+    }
+    
+    else if(p == patches) {
+      pop_cc[p,3,y] <- round(pop_cc[p,2,y-1] * (1 - m) * gA[p, y-1]) + # young adults in patch
+        round(pop_cc[p,3,y-1] * (1 - m) * (1 - spill)) + # adults in patch, minus mortality and spillover (only to one patch)
+        round(pop_cc[p-1,3,y-1] * (1 - m) * spill) # and patch below
+    }
+    
+    else{
+      pop_cc[p,3,y] <- round(pop_cc[p,2,y-1] * (1 - m) * gA[p, y-1]) + # young adults in patch
+        round(pop_cc[p,3,y-1] * (1 - m) * (1 - 2*spill)) + # adults in patch, minus mortality and spillover x2
+        round(pop_cc[p-1,3,y-1] * (1 - m) * spill) + # add dispersal from patch below
+        round(pop_cc[p+1,3,y-1] * (1 - m) * spill) # and patch above
+    }
+  }
+}
+
+pop_ccdf <- pop_cc %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as.data.frame() %>% 
+  mutate(stage = factor(stage))
+
+# plot lat temp gradient
+
+sst %>% 
+  reshape::melt(varnames=c("patch","year")) %>% 
+  ggplot(aes(x=year, y=value, color=value)) + 
+  facet_wrap(~patch) + 
+  geom_line() +
+  labs(y="sst")
+
+pop_ccdf %>% 
+  ggplot(aes(x=year, y=value, color=stage)) + 
+  geom_line() + 
+  facet_wrap(~patch) +
+  theme_bw() +
+  scale_color_manual(values=c('blue','deeppink','cyan')) +
+  labs(y="abundance")
+```
+
+
+
+
 
 
 ```{r, eval=FALSE}
