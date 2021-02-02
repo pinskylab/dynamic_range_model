@@ -9,7 +9,7 @@ data {
   
   int n_p_s_y[np,ns,ny]; // array of numbers at patch, stage, and year 
   
-  int proj_init[np,ns,1]; // array of initial states for the future projections
+  int proj_init[np,ns]; // array of initial states for the future projections
   
   int ny_proj; // number of years to forecast 
   
@@ -133,7 +133,7 @@ generated quantities{
   
   real tmp[np, ns, ny_proj]; 
   
-  real raw_proj[np, ny_proj - 1]; // why are these one year shorter?
+//  real raw_proj[np, ny_proj - 1]; // we're not using this right now! 
   
   real rec_dev_proj[np, ny_proj - 1];
   
@@ -168,7 +168,8 @@ generated quantities{
   
   for(p in 1:np){
     for(s in 1:ns){
-      pp_proj_n_p_s_y_hat[p,s,1] = proj_init[p,s,1]; // initiate projection with fixed observation
+      pp_proj_n_p_s_y_hat[p,s,1] = proj_init[p,s]; // initiate projection with fixed observation
+      tmp[p, s, 1] = proj_init[p,s];
     }
   }
   
@@ -189,6 +190,7 @@ generated quantities{
       }
       
       // fit multinomial to all stages 
+
       pp_proj_n_p_s_y_hat[p, 1:ns, y] = multinomial_rng(to_vector(tmp[p, 1:ns, y]) / sum(to_vector(tmp[p, 1:ns, y])), 100);
       
     }
