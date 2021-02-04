@@ -14,10 +14,6 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 ```{r}
 set.seed(42)
 library(tidyverse)
-library(rstan)
-library(tidybayes)
-library(bayesplot)
-library(ggridges)
 ```
 
 Simulate a population with simple stage structure
@@ -417,11 +413,7 @@ pop_ccdf %>%
 ```
 
 
-
-
-
-
-```{r, eval=FALSE}
+```{r, eval=TRUE}
 stage_data <- list(
   m = m,
   np = patches,
@@ -456,7 +448,7 @@ stage_model_fit <- stan(file = here::here("src","stage_ar_model.stan"),
 
 ```
 
-```{r, eval=FALSE}
+```{r, eval=TRUE}
 
 
 

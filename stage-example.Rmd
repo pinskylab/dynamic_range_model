@@ -2,7 +2,9 @@
 title: "stage-example"
 author: "Dan Ovando"
 date: "1/12/2021"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -125,9 +127,6 @@ stage_model_fit <- stan(file = here::here("src","stage_ar_model.stan"),
 Evaluate the model 
 
 ```{r}
-
-
-
 mean_recruits_hat <- tidybayes::gather_draws(stage_model_fit, mean_recruits[patch], n = 1000)
 
 mean_recruits <- tibble(patch = 1:patches, mean_recruits = mean_rec)
