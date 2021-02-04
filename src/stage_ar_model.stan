@@ -127,31 +127,60 @@ model {
 
 generated quantities{
   
-  int pp_n_p_s_y_hat[np, ns, ny];
+  real pp_n_p_s_y_hat[np, ns, ny];
   
-  int pp_proj_n_p_s_y_hat[np, ns, ny_proj]; 
+  real pp_proj_n_p_s_y_hat[np, ns, ny_proj]; 
   
-  real tmp[np, ns, ny_proj]; 
+  real tmp[np, ns, ny]; 
   
-//  real raw_proj[np, ny_proj - 1]; // we're not using this right now! 
-  
+  real tmp_proj[np, ns, ny_proj]; 
+
   real rec_dev_proj[np, ny_proj - 1];
   
   pp_n_p_s_y_hat[1:np, 1:ns, 1] = n_p_s_y[1:np,1:ns,1]; // initialize posterior predictive for training data with real starting pop
   
+  tmp[1:np, 1:ns, 1] = n_p_s_y[1:np,1:ns,1]; // initialize posterior predictive for training data with real starting pop
+
   // generate posterior predictives for training data
+
+  
+  // for(p in 1:np){
+  //   for(s in 1:ns){
+  //     pp_n_p_s_y_hat[p,s,1] = proj_init[p,s]; // initiate projection with fixed observation
+  //     tmp[p, s, 1] = proj_init[p,s];
+  //   }
+  // }
+  
+  // separate loop for projecting pop because we added stage structure 
   
   for(p in 1:np){
     for(y in 2:ny){
-      pp_n_p_s_y_hat[p,1:ns,y] = multinomial_rng(to_vector(n_p_s_y_hat[p,1:ns,y]) / sum(to_vector(n_p_s_y_hat[p,1:ns,y])), 100);  // the 1:ns syntax makes it a proportion over all stages
-      // not sure the sum is the right number of draws/trials
       
-    }
-  }
+      // project stage 1 (recruitment)
+      
+      tmp[p, 1, y] = neg_binomial_2_rng(n_p_s_y_hat[p,1,y],sigma_obs); // observation error for number of recruits, a little weird since outputting an int into a real, but works. 
+      
+      for(s in 2:ns){
+        
+        // project other stages 
+        tmp[p, s, y] = tmp[p,s-1,y-1] * exp(-m); // derterministically fill in the rest of the numbers at stage
+        
+      }
+      
+
+      pp_n_p_s_y_hat[p, 1:ns, y] = tmp[p,1:ns,y];
+
+      // fit multinomial to all stages, not really needed except to add noise from sub-sampling
+
+      // pp_proj_n_p_s_y_hat[p, 1:ns, y] = multinomial_rng(to_vector(tmp[p, 1:ns, y]) / sum(to_vector(tmp[p, 1:ns, y])), 100);
+      
+    } // close proj loop
+    
+  } // close patch loop
+ 
   
-  // generate posterior predictives for the testing data
+  // generate posterior predictives for the testing data aka project recruitment deviates into the future
   
-  // project recruitment deviates into the future
   for(p in 1:np){
     for(y in 2:ny_proj){
       
@@ -169,7 +198,7 @@ generated quantities{
   for(p in 1:np){
     for(s in 1:ns){
       pp_proj_n_p_s_y_hat[p,s,1] = proj_init[p,s]; // initiate projection with fixed observation
-      tmp[p, s, 1] = proj_init[p,s];
+      tmp_proj[p, s, 1] = proj_init[p,s];
     }
   }
   
@@ -179,23 +208,23 @@ generated quantities{
     for(y in 2:ny_proj){
       
       // project stage 1 (recruitment)
-      tmp[p, 1, y] = exp(rec_dev_proj[p, y-1]); // not sure if this is in the same units as n_p_s_y_hat anymore... double-check this! 
-      
+      tmp_proj[p, 1, y] = neg_binomial_2_rng(mean_recruits[p] * exp(rec_dev_proj[p, y-1]),sigma_obs); // not sure if this is in the same units as n_p_s_y_hat anymore... double-check this! adding in observation error for number of recruits
       
       for(s in 2:ns){
         
         // project other stages 
-        tmp[p, s, y] = tmp[p,s-1,y-1] * exp(-m);
+        tmp_proj[p, s, y] = tmp_proj[p,s-1,y-1] * exp(-m);
         
       }
       
-      // fit multinomial to all stages 
+      // fit multinomial to all stages: no need for this except to simulate the slight addition of error from subsampling the numbers at age
 
-      pp_proj_n_p_s_y_hat[p, 1:ns, y] = multinomial_rng(to_vector(tmp[p, 1:ns, y]) / sum(to_vector(tmp[p, 1:ns, y])), 100);
+      pp_proj_n_p_s_y_hat[p, 1:ns, y] = tmp_proj[p,1:ns,y];
+
+      // pp_proj_n_p_s_y_hat[p, 1:ns, y] = multinomial_rng(to_vector(tmp[p, 1:ns, y]) / sum(to_vector(tmp[p, 1:ns, y])), 100);
       
-    }
+    } // close proj loop
     
-    
-  }
-}
+  } // close patch loop
+} // close generated quantities
 
