@@ -11,17 +11,16 @@ output:
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 ```
 
-```{r}
+```{r packages}
 set.seed(42)
 library(tidyverse)
+library(tidybayes)
+
+library(here)
+
+library(rstan)
 ```
 
-Simulate a population with simple stage structure
-
-* Autoregressive recruitment process
-* All individuals transition stages every year, modulated by a fixed mortality rate
-* Adults do not accumulate (implies death after reaching adulthood)
-* No dispersal
 
 ```{r prep}
 patches <- 12
@@ -31,8 +30,8 @@ m <- 0.2 # I use this slightly differently in later sims (not exponentiated anym
 stages <- 3
 
 years <- 100
-years_train <- 25
-years_proj <- 5
+years_train <- 80
+years_proj <- 20
 
 alpha <- 0.5
 
@@ -44,6 +43,15 @@ hist(mean_rec)
 
 n0 <- mean_rec * matrix(rep(exp(-m * (0:(stages - 1))),patches), nrow = patches, ncol = stages, byrow = TRUE)
 ```
+
+# Simple stage structure
+
+## Simulate the data
+
+* Autoregressive recruitment process
+* All individuals transition stages every year, modulated by a fixed mortality rate
+* Adults do not accumulate (implies death after reaching adulthood)
+* No dispersal
 
 ```{r sim-ar-simple-stage}
 
@@ -75,7 +83,122 @@ popdf %>%
 
 ```
 
-Letting adults live more than 1 year
+## Fit a model
+
+```{r stage_ar_model}
+stage_data <- list(
+  m = m,
+  np = patches,
+  ns = stages,
+  ny = years_train,
+  n_p_s_y = pop[,,1:years_train],
+  proj_init = pop[,,years_train],
+  ny_proj = years_proj
+)
+
+warmups <- 1000
+
+total_iterations <- 2000
+
+max_treedepth <-  12
+
+n_chains <-  4
+
+n_cores <- 4 
+
+stage_model_fit <- stan(file = here::here("src","stage_ar_model.stan"),
+           data = stage_data,
+           chains = n_chains,
+           warmup = warmups,
+           iter = total_iterations,
+           cores = n_cores,
+           refresh = 250,
+           control = list(max_treedepth = max_treedepth,
+                          adapt_delta = 0.95))
+
+
+```
+
+## Evaluate the model 
+
+```{r}
+mean_recruits_hat <- tidybayes::gather_draws(stage_model_fit, mean_recruits[patch], n = 1000)
+
+mean_recruits <- tibble(patch = 1:patches, mean_recruits = mean_rec)
+
+mean_recruits %>% 
+  ggplot() + 
+  geom_boxplot(data = mean_recruits_hat, aes(patch, .value, group = patch)) +
+  geom_point(aes(patch, mean_recruits, color = "true"), size = 2) + 
+  scale_y_continuous(name = "Mean Recruits") + 
+  scale_x_continuous(name = "Patch")
+
+
+n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, n_p_s_y_hat[patch, stage,year], n = 1000)
+
+pp_n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_n_p_s_y_hat[patch, stage,year], n = 1000)
+
+pp_proj_n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_proj_n_p_s_y_hat[patch, stage,year], n = 1000)
+
+n_p_s_y <- pop[,,1:years_train] %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
+
+
+n_p_s_y_proj <- pop[,,(years_train+1):years] %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
+# 
+# eg_patch <- 10
+# 
+# n_p_s_y_hat %>% 
+#   filter(patch == eg_patch) %>% 
+#   ggplot() +
+#    stat_lineribbon(aes(x = stage, y = .value),.width = c(.9, .6)) +
+#   geom_point(data = n_p_s_y %>% filter(patch == eg_patch), aes(stage, value, color = "true")) +
+#   facet_wrap(~year, scales = "free") + 
+#   scale_y_continuous(name = "Numbers") + 
+#   labs(caption = glue::glue("for patch {eg_patch}"))
+
+
+gg_n_p_s_y_hat <- n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer() +
+  labs(title="model predictions")
+
+# posterior predictive fits
+gg_pp_n_p_s_y_hat <- pp_n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer()+
+  labs(title="posterior predictive fit")
+
+# forecast fits
+gg_pp_proj_n_p_s_y_hat <- pp_proj_n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y_proj, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer() +
+  labs(title="forecast")
+
+gg_n_p_s_y_hat
+gg_pp_n_p_s_y_hat
+gg_pp_proj_n_p_s_y_hat
+
+ggsave(gg_n_p_s_y_hat, filename=here("results","stage_ar_model_fit.png"), width=7, height=10)
+ggsave(gg_pp_n_p_s_y_hat, filename=here("results","stage_ar_model_pp.png"), width=7, height=10)
+ggsave(gg_pp_proj_n_p_s_y_hat, filename=here("results","stage_ar_model_proj.png"), width=7, height=10)
+```
+
+# Letting adults live more than 1 year
+
+## Simulate the data
 
 * Autoregressive recruitment process
 * All individuals transition stages every year, modulated by a fixed mortality rate
@@ -86,26 +209,26 @@ Letting adults live more than 1 year
 
 # generate data
 
-pop_adults <- array(NA, dim = c(patches, stages, years))
+pop <- array(NA, dim = c(patches, stages, years))
 
-pop_adults[,,1] <- round(n0) # initialize first year  
+pop[,,1] <- round(n0) # initialize first year  
 
 for (y in 2:years){
   
-  pop_adults[,1,y] <- round(mean_rec * exp(rnorm(patches,-sigma_r^2/2, sigma_r))) # should we be keeping the recruits from last year that didn't grow? 
+  pop[,1,y] <- round(mean_rec * exp(rnorm(patches,-sigma_r^2/2, sigma_r))) # should we be keeping the recruits from last year that didn't grow? 
   
-  pop_adults[,2,y] <-   round(pop[,1,y-1] * exp(-m)) # intermediate stage is just a function of recruits (assume all survivors transition stage)
+  pop[,2,y] <-   round(pop[,1,y-1] * exp(-m)) # intermediate stage is just a function of recruits (assume all survivors transition stage)
   
-  pop_adults[,3,y] <- round(pop[,2,y-1] * exp(-m)) + round(pop[,3,y-1] * exp(-m)) # sum adults and juveniles from previous year, minus mortality
+  pop[,3,y] <- round(pop[,2,y-1] * exp(-m)) + round(pop[,3,y-1] * exp(-m)) # sum adults and juveniles from previous year, minus mortality
   
 }
 
-pop_adultsdf <- pop_adults %>% 
+popdf <- pop %>% 
   reshape::melt(varnames = c("patch","stage","year")) %>% 
   as.data.frame() %>% 
   mutate(stage = factor(stage))
 
-pop_adultsdf %>% 
+popdf %>% 
   ggplot(aes(x=year, y=value, color=stage)) + 
   geom_line() + 
   facet_wrap(~patch) +
@@ -113,7 +236,121 @@ pop_adultsdf %>%
   scale_color_manual(values=c('blue','deeppink','cyan'))
 ```
 
-Adding growth rates between stages
+## Fit a model 
+
+
+```{r stage_ar_model_adults_survive}
+stage_data <- list(
+  m = m,
+  np = patches,
+  ns = stages,
+  ny = years_train,
+  n_p_s_y = pop[,,1:years_train],
+  proj_init = pop[,,years_train],
+  ny_proj = years_proj
+)
+
+warmups <- 1000
+
+total_iterations <- 2000
+
+max_treedepth <-  12
+
+n_chains <-  4
+
+n_cores <- 4 
+
+stage_model_fit <- stan(file = here::here("src","stage_ar_model_adults_survive.stan"),
+           data = stage_data,
+           chains = n_chains,
+           warmup = warmups,
+           iter = total_iterations,
+           cores = n_cores,
+           refresh = 250,
+           control = list(max_treedepth = max_treedepth,
+                          adapt_delta = 0.95))
+
+
+```
+
+## Evaluate the model
+
+```{r}
+mean_recruits_hat <- tidybayes::gather_draws(stage_model_fit, mean_recruits[patch], n = 1000)
+
+mean_recruits <- tibble(patch = 1:patches, mean_recruits = mean_rec)
+
+mean_recruits %>% 
+  ggplot() + 
+  geom_boxplot(data = mean_recruits_hat, aes(patch, .value, group = patch)) +
+  geom_point(aes(patch, mean_recruits, color = "true"), size = 2) + 
+  scale_y_continuous(name = "Mean Recruits") + 
+  scale_x_continuous(name = "Patch")
+
+n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, n_p_s_y_hat[patch, stage,year], n = 1000)
+
+pp_n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_n_p_s_y_hat[patch, stage,year], n = 1000)
+
+pp_proj_n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_proj_n_p_s_y_hat[patch, stage,year], n = 1000)
+
+n_p_s_y <- pop[,,1:years_train] %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
+
+
+n_p_s_y_proj <- pop[,,(years_train+1):years] %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
+# 
+# eg_patch <- 10
+# 
+# n_p_s_y_hat %>% 
+#   filter(patch == eg_patch) %>% 
+#   ggplot() +
+#    stat_lineribbon(aes(x = stage, y = .value),.width = c(.9, .6)) +
+#   geom_point(data = n_p_s_y %>% filter(patch == eg_patch), aes(stage, value, color = "true")) +
+#   facet_wrap(~year, scales = "free") + 
+#   scale_y_continuous(name = "Numbers") + 
+#   labs(caption = glue::glue("for patch {eg_patch}"))
+
+
+gg_n_p_s_y_hat <- n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer() +
+  labs(title="model predictions")
+
+# posterior predictive fits
+gg_pp_n_p_s_y_hat <- pp_n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer()+
+  labs(title="posterior predictive fit")
+
+# forecast fits
+gg_pp_proj_n_p_s_y_hat <- pp_proj_n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y_proj, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer() +
+  labs(title="forecast")
+
+gg_n_p_s_y_hat
+gg_pp_n_p_s_y_hat
+gg_pp_proj_n_p_s_y_hat
+
+ggsave(gg_n_p_s_y_hat, filename=here("results","stage_ar_model_adults_survive_fit.png"), width=7, height=10)
+ggsave(gg_pp_n_p_s_y_hat, filename=here("results","stage_ar_model_adults_survive_pp.png"), width=7, height=10)
+ggsave(gg_pp_proj_n_p_s_y_hat, filename=here("results","stage_ar_model_adults_survive_proj.png"), width=7, height=10)
+```
+
+
+# Adding growth rates between stages
 
 * Autoregressive recruitment process
 * Change in classes 2 and 3 now a result of mortality and growth from previous stage (both fixed) 
@@ -329,6 +566,7 @@ width <- 4 # sensitivity to temperature variation
 sstopt <- 18 # temp at which growth is maximized
 
 growth <- function(sst) {exp(-0.5 * ((sst - sstopt)/width)^2)}
+plot(seq(1, 100, 1), growth(seq(1, 100, 1))) # check how this works
 
 spill <- 0.1
 
@@ -369,19 +607,19 @@ for (y in 2:years){
     
     # add reflecting cases for edge patches
     if(p == 1) {
-      pop_cc[p,3,y] <- round(pop_cc[p,2,y-1] * (1 - m) * gA[p, y-1]) + # young adults in patch
+      pop_cc[p,3,y] <- round(pop_cc[p,2,y-1] * (1 - m) * gA[p, y-1]) + # growth from young adults in patch
         round(pop_cc[p,3,y-1] * (1 - m) * (1 - spill)) + # adults in patch, minus mortality and spillover (only to one patch)
         round(pop_cc[p+1,3,y-1] * (1 - m) * spill) # and patch above
     }
     
     else if(p == patches) {
-      pop_cc[p,3,y] <- round(pop_cc[p,2,y-1] * (1 - m) * gA[p, y-1]) + # young adults in patch
+      pop_cc[p,3,y] <- round(pop_cc[p,2,y-1] * (1 - m) * gA[p, y-1]) + # growth from young adults in patch
         round(pop_cc[p,3,y-1] * (1 - m) * (1 - spill)) + # adults in patch, minus mortality and spillover (only to one patch)
         round(pop_cc[p-1,3,y-1] * (1 - m) * spill) # and patch below
     }
     
     else{
-      pop_cc[p,3,y] <- round(pop_cc[p,2,y-1] * (1 - m) * gA[p, y-1]) + # young adults in patch
+      pop_cc[p,3,y] <- round(pop_cc[p,2,y-1] * (1 - m) * gA[p, y-1]) + # growth from young adults in patch
         round(pop_cc[p,3,y-1] * (1 - m) * (1 - 2*spill)) + # adults in patch, minus mortality and spillover x2
         round(pop_cc[p-1,3,y-1] * (1 - m) * spill) + # add dispersal from patch below
         round(pop_cc[p+1,3,y-1] * (1 - m) * spill) # and patch above
