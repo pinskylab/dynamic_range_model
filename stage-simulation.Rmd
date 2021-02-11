@@ -515,8 +515,10 @@ ggsave(gg_pp_proj_n_p_s_y_hat, filename=here("results","stage_ar_model_growth_ra
 
 * Autoregressive recruitment process
 * Change in classes 2 and 3 now a result of mortality and growth from previous stage (both fixed) 
-* Adults accumulate (keep adults from last year less the same mortality rate as used for other stages)
+* Adults and young adults accumulate (keep pop. from last year less the same mortality rate as used for other stages, and in the case of young adults, less the proportion that grew to adults)
 * 10% of adults move to adjacent patches every year (passive spillover) 
+
+## Simulate the data 
 
 ```{r sim-ar-adult-dispersal}
 
@@ -526,50 +528,50 @@ gA <- 0.5 # transition rate into adults
 
 spill <- 0.1
 
-pop_spill <- array(NA, dim = c(patches, stages, years))
+pop <- array(NA, dim = c(patches, stages, years))
 
-pop_spill[,,1] <- round(n0) # initialize first year  
+pop[,,1] <- round(n0) # initialize first year  
 
 for (y in 2:years){
   
   # recruits
-  pop_spill[,1,y] <- round(mean_rec * exp(rnorm(patches,-sigma_r^2/2, sigma_r)))
+  pop[,1,y] <- round(mean_rec * exp(rnorm(patches,-sigma_r^2/2, sigma_r)))
   
   # young adults / large juvs
-  pop_spill[,2,y] <- round(pop_spill[,1,y-1] * (1 - m) * gY) + # recruits, less mortality, plus growth into this stage
-    round(pop_spill[,2,y-1] * (1 - m) * (1 - gA)) # this life stage last year less individuals that died or grew out 
+  pop[,2,y] <- round(pop[,1,y-1] * (1 - m) * gY) + # recruits, less mortality, plus growth into this stage
+    round(pop[,2,y-1] * (1 - m) * (1 - gA)) # this life stage last year less individuals that died or grew out 
   
   for(p in 1:patches) {
     # adults
     
     # add reflecting cases for edge patches
     if(p == 1) {
-      pop_spill[p,3,y] <- round(pop_spill[p,2,y-1] * (1 - m) * gA) + # young adults in patch
-        round(pop_spill[p,3,y-1] * (1 - m) * (1 - spill)) + # adults in patch, minus mortality and spillover (only to one patch)
-        round(pop_spill[p+1,3,y-1] * (1 - m) * spill) # and patch above
+      pop[p,3,y] <- round(pop[p,2,y-1] * (1 - m) * gA) + # young adults in patch
+        round(pop[p,3,y-1] * (1 - m) * (1 - spill)) + # adults in patch, minus mortality and spillover (only to one patch)
+        round(pop[p+1,3,y-1] * (1 - m) * spill) # and patch above
     }
     
     else if(p == patches) {
-      pop_spill[p,3,y] <- round(pop_spill[p,2,y-1] * (1 - m) * gA) + # young adults in patch
-        round(pop_spill[p,3,y-1] * (1 - m) * (1 - spill)) + # adults in patch, minus mortality and spillover (only to one patch)
-        round(pop_spill[p-1,3,y-1] * (1 - m) * spill) # and patch below
+      pop[p,3,y] <- round(pop[p,2,y-1] * (1 - m) * gA) + # young adults in patch
+        round(pop[p,3,y-1] * (1 - m) * (1 - spill)) + # adults in patch, minus mortality and spillover (only to one patch)
+        round(pop[p-1,3,y-1] * (1 - m) * spill) # and patch below
     }
     
     else{
-      pop_spill[p,3,y] <- round(pop_spill[p,2,y-1] * (1 - m) * gA) + # young adults in patch
-        round(pop_spill[p,3,y-1] * (1 - m) * (1 - 2*spill)) + # adults in patch, minus mortality and spillover x2
-        round(pop_spill[p-1,3,y-1] * (1 - m) * spill) + # add dispersal from patch below
-        round(pop_spill[p+1,3,y-1] * (1 - m) * spill) # and patch above
+      pop[p,3,y] <- round(pop[p,2,y-1] * (1 - m) * gA) + # young adults in patch
+        round(pop[p,3,y-1] * (1 - m) * (1 - 2*spill)) + # adults in patch, minus mortality and spillover x2
+        round(pop[p-1,3,y-1] * (1 - m) * spill) + # add dispersal from patch below
+        round(pop[p+1,3,y-1] * (1 - m) * spill) # and patch above
     }
   }
 }
 
-pop_spilldf <- pop_spill %>% 
+popdf <- pop %>% 
   reshape::melt(varnames = c("patch","stage","year")) %>% 
   as.data.frame() %>% 
   mutate(stage = factor(stage))
 
-pop_spilldf %>% 
+popdf %>% 
   ggplot(aes(x=year, y=value, color=stage)) + 
   geom_line() + 
   facet_wrap(~patch) +
@@ -577,7 +579,46 @@ pop_spilldf %>%
   scale_color_manual(values=c('blue','deeppink','cyan'))
 ```
 
-Adding temperature dependence
+## Fit a model
+
+```{r stage_ar_model_adult_dispersal}
+stage_data <- list(
+  m = m,
+  gY = gY,
+  gA = gA,
+  spill = spill,
+  np = patches,
+  ns = stages,
+  ny = years_train,
+  n_p_s_y = pop[,,1:years_train],
+  proj_init = pop[,,years_train],
+  ny_proj = years_proj
+)
+
+warmups <- 1000
+
+total_iterations <- 2000
+
+max_treedepth <-  12
+
+n_chains <-  4
+
+n_cores <- 4 
+
+stage_model_fit <- stan(file = here::here("src","stage_ar_model_adult_dispersal.stan"),
+           data = stage_data,
+           chains = n_chains,
+           warmup = warmups,
+           iter = total_iterations,
+           cores = n_cores,
+           refresh = 250,
+           control = list(max_treedepth = max_treedepth,
+                          adapt_delta = 0.95))
+
+
+```
+
+# Adding temperature dependence
 
 * Autoregressive recruitment process
 * Change in classes 2 and 3 now a result of mortality and growth from previous stage (growth is now temperature dependent) 
