@@ -354,39 +354,40 @@ ggsave(gg_pp_proj_n_p_s_y_hat, filename=here("results","stage_ar_model_adults_su
 
 * Autoregressive recruitment process
 * Change in classes 2 and 3 now a result of mortality and growth from previous stage (both fixed) 
-* Adults accumulate (keep adults from last year less the same mortality rate as used for other stages)
+* Adults and young adults accumulate (keep pop. from last year less the same mortality rate as used for other stages, and in the case of young adults, less the proportion that grew to adults)
 * No dispersal 
 
+## Simulate the data 
 ```{r sim-ar-stage-growth}
 
 gY <- 0.5 # transition rate into young adults
 
 gA <- 0.5 # transition rate into adults
 
-pop_growth <- array(NA, dim = c(patches, stages, years))
+pop <- array(NA, dim = c(patches, stages, years))
 
-pop_growth[,,1] <- round(n0) # initialize first year  
+pop[,,1] <- round(n0) # initialize first year  
 
 for (y in 2:years){
   
   # recruits
-  pop_growth[,1,y] <- round(mean_rec * exp(rnorm(patches,-sigma_r^2/2, sigma_r)))
+  pop[,1,y] <- round(mean_rec * exp(rnorm(patches,-sigma_r^2/2, sigma_r)))
   
   # young adults / large juvs
-  pop_growth[,2,y] <- round(pop_growth[,1,y-1] * (1 - m) * gY) + # recruits, less mortality, plus growth into this stage
-    round(pop_growth[,2,y-1] * (1 - m) * (1 - gA)) # this life stage last year less individuals that died or grew out 
+  pop[,2,y] <- round(pop[,1,y-1] * (1 - m) * gY) + # recruits, less mortality, plus growth into this stage
+    round(pop[,2,y-1] * (1 - m) * (1 - gA)) # this life stage last year less individuals that died or grew out 
   
   # adults
-  pop_growth[,3,y] <- round(pop_growth[,2,y-1] * (1 - m) * gA) + # previous stage 
-    round(pop_growth[,3,y-1] * (1 - m))
+  pop[,3,y] <- round(pop[,2,y-1] * (1 - m) * gA) + # previous stage 
+    round(pop[,3,y-1] * (1 - m))
 }
 
-pop_growthdf <- pop_growth %>% 
+popdf <- pop %>% 
   reshape::melt(varnames = c("patch","stage","year")) %>% 
   as.data.frame() %>% 
   mutate(stage = factor(stage))
 
-pop_growthdf %>% 
+popdf %>% 
   ggplot(aes(x=year, y=value, color=stage)) + 
   geom_line() + 
   facet_wrap(~patch) +
@@ -394,7 +395,123 @@ pop_growthdf %>%
   scale_color_manual(values=c('blue','deeppink','cyan'))
 ```
 
-Adding dispersal
+## Fit a model
+
+
+```{r stage_ar_model_adults_survive}
+stage_data <- list(
+  m = m,
+  gY = gY,
+  gA = gA,
+  np = patches,
+  ns = stages,
+  ny = years_train,
+  n_p_s_y = pop[,,1:years_train],
+  proj_init = pop[,,years_train],
+  ny_proj = years_proj
+)
+
+warmups <- 1000
+
+total_iterations <- 2000
+
+max_treedepth <-  12
+
+n_chains <-  4
+
+n_cores <- 4 
+
+stage_model_fit <- stan(file = here::here("src","stage_ar_model_growth_rates.stan"),
+           data = stage_data,
+           chains = n_chains,
+           warmup = warmups,
+           iter = total_iterations,
+           cores = n_cores,
+           refresh = 250,
+           control = list(max_treedepth = max_treedepth,
+                          adapt_delta = 0.95))
+
+
+```
+
+## Evaluate the model
+
+
+```{r}
+mean_recruits_hat <- tidybayes::gather_draws(stage_model_fit, mean_recruits[patch], n = 1000)
+
+mean_recruits <- tibble(patch = 1:patches, mean_recruits = mean_rec)
+
+mean_recruits %>% 
+  ggplot() + 
+  geom_boxplot(data = mean_recruits_hat, aes(patch, .value, group = patch)) +
+  geom_point(aes(patch, mean_recruits, color = "true"), size = 2) + 
+  scale_y_continuous(name = "Mean Recruits") + 
+  scale_x_continuous(name = "Patch")
+
+n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, n_p_s_y_hat[patch, stage,year], n = 1000)
+
+pp_n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_n_p_s_y_hat[patch, stage,year], n = 1000)
+
+pp_proj_n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_proj_n_p_s_y_hat[patch, stage,year], n = 1000)
+
+n_p_s_y <- pop[,,1:years_train] %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
+
+
+n_p_s_y_proj <- pop[,,(years_train+1):years] %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
+# 
+# eg_patch <- 10
+# 
+# n_p_s_y_hat %>% 
+#   filter(patch == eg_patch) %>% 
+#   ggplot() +
+#    stat_lineribbon(aes(x = stage, y = .value),.width = c(.9, .6)) +
+#   geom_point(data = n_p_s_y %>% filter(patch == eg_patch), aes(stage, value, color = "true")) +
+#   facet_wrap(~year, scales = "free") + 
+#   scale_y_continuous(name = "Numbers") + 
+#   labs(caption = glue::glue("for patch {eg_patch}"))
+
+
+gg_n_p_s_y_hat <- n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer() +
+  labs(title="model predictions")
+
+# posterior predictive fits
+gg_pp_n_p_s_y_hat <- pp_n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer()+
+  labs(title="posterior predictive fit")
+
+# forecast fits
+gg_pp_proj_n_p_s_y_hat <- pp_proj_n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y_proj, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer() +
+  labs(title="forecast")
+
+gg_n_p_s_y_hat
+gg_pp_n_p_s_y_hat
+gg_pp_proj_n_p_s_y_hat
+
+ggsave(gg_n_p_s_y_hat, filename=here("results","stage_ar_model_growth_rates_fit.png"), width=7, height=10)
+ggsave(gg_pp_n_p_s_y_hat, filename=here("results","stage_ar_model_growth_rates_pp.png"), width=7, height=10)
+ggsave(gg_pp_proj_n_p_s_y_hat, filename=here("results","stage_ar_model_growth_rates_proj.png"), width=7, height=10)
+```
+
+#Adding dispersal
 
 * Autoregressive recruitment process
 * Change in classes 2 and 3 now a result of mortality and growth from previous stage (both fixed) 
