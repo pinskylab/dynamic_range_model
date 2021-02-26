@@ -398,7 +398,7 @@ popdf %>%
 ## Fit a model
 
 
-```{r stage_ar_model_adults_survive}
+```{r stage_ar_model_growth_rates}
 stage_data <- list(
   m = m,
   gY = gY,
