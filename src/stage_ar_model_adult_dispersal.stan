@@ -43,7 +43,7 @@ parameters{
 
 transformed parameters{
   
-  real sigma_r;
+  real<lower=0> sigma_r;
   
   vector[np] mean_recruits;
   
@@ -57,9 +57,10 @@ transformed parameters{
   
   n_p_s_y_hat[1:np,1:ns,1] = n_p_s_y[1:np,1:ns,1]; // initialize population with "known" values
   
-  for (p in 1:np){
+  
+  for (y in 2:ny){
     
-    for (y in 2:ny){
+    for (p in 1:np){
       
       if (y == 2){
         
@@ -75,38 +76,41 @@ transformed parameters{
       
       // note life stages are now hard-coded by number, not indexed by s here
       
-      
       n_p_s_y_hat[p,1,y] = mean_recruits[p] * exp(rec_dev[p,y-1]);
       
       n_p_s_y_hat[p,2,y] = n_p_s_y_hat[p,1,y-1] * (1 - m) * gY + n_p_s_y_hat[p,2,y-1] * (1 - m) * (1 - gA); // AF: got rid of exp(-m) here 
       
-      // adding adult dispersal - edge cases first (reflecting edges)
-      if(p==1){
-        n_p_s_y_hat[p,3,y] = n_p_s_y_hat[p,2,y-1] * (1 - m) * gA + // young adults from last year that grew
-        n_p_s_y_hat[p,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
-        n_p_s_y_hat[p+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
-      }
-      
-      else if(p==np){
-        n_p_s_y_hat[p,3,y] = n_p_s_y_hat[p,2,y-1] * (1 - m) * gA + // young adults from last year that grew
-        n_p_s_y_hat[p,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
-        n_p_s_y_hat[p-1, 3, y-1] * (1 - m) * spill; // dispersal from patch below
-      }
-      
-      // general case for non-edge patches
-      else{
-        n_p_s_y_hat[p,3,y] = n_p_s_y_hat[p,2,y-1] * (1 - m) * gA + // young adults from last year that grew
-        n_p_s_y_hat[p,3,y-1] * (1 - m) * (1 - 2*spill) + // adults from last year that survived, minus those that dispersed to two patches
-        n_p_s_y_hat[p-1, 3, y-1] * (1 - m) * spill + //dispersal from patch below
-        n_p_s_y_hat[p+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
-      }
-      
-    } // close years
+    } // close patches for stages 1 and 2
     
-  } // close patches
+    // adding adult dispersal - edge cases first (reflecting edges)
+    
+    // this used to be in a for loop over all p but it caused some syntax issues, so it's hard-coded for the edge patches now 
+    
+    // p = 1 case 
+    n_p_s_y_hat[1,3,y] = n_p_s_y_hat[1,2,y-1] * (1 - m) * gA + n_p_s_y_hat[1,3,y-1] * (1 - m) * (1 - spill) + n_p_s_y_hat[2, 3, y-1] * (1 - m) * spill; 
+    // young adults from last year that grew
+    // adults from last year that survived, minus those that dispersed to one patch only
+    // dispersal from patch above
+    
+    // p = np case
+    n_p_s_y_hat[np,3,y] = n_p_s_y_hat[np,2,y-1] * (1 - m) * gA + n_p_s_y_hat[np,3,y-1] * (1 - m) * (1 - spill) + n_p_s_y_hat[np-1, 3, y-1] * (1 - m) * spill;
+    // young adults from last year that grew
+    // adults from last year that survived, minus those that dispersed to one patch only
+    // dispersal from patch below
+    
+    // general case for non-edge patches
+    for(p in 2:(np-1)){
+      n_p_s_y_hat[p,3,y] = n_p_s_y_hat[p,2,y-1] * (1 - m) * gA + n_p_s_y_hat[p,3,y-1] * (1 - m) * (1 - 2*spill) + n_p_s_y_hat[p-1, 3, y-1] * (1 - m) * spill + n_p_s_y_hat[p+1, 3, y-1] * (1 - m) * spill; 
+      // young adults from last year that grew
+      // adults from last year that survived, minus those that dispersed to two patches
+      //dispersal from patch below
+      // dispersal from patch above
+      
+    } // close patches from 2 to np-1
+    
+  } // close years
   
-  
-}
+} // close transformed parameters block
 
 model {
   
@@ -181,8 +185,10 @@ generated quantities{
       
       // separate loop for projecting pop because we added stage structure
       
-      for(p in 1:np){
         for(y in 2:ny){
+          
+          
+      for(p in 1:np){
           
           // project stage 1 (recruitment)
           
@@ -192,41 +198,40 @@ generated quantities{
           
           tmp[p,2,y] = tmp[p,1,y-1] * (1 - m) * gY + tmp[p,2,y-1] * (1 - m) * (1 - gA); 
           
+      } // close patch loop for stages 1 and 2
+          
           // adult dispersal
           
-          if(p==1){
-            tmp[p,3,y] = tmp[p,2,y-1] * (1 - m) * gA + // young adults from last year that grew
-            tmp[p,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
-            tmp[p+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
-          }
+          // p = 1
+            tmp[1,3,y] = tmp[1,2,y-1] * (1 - m) * gA + // young adults from last year that grew
+            tmp[1,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
+            tmp[1+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
           
-          else if(p==np){
-            tmp[p,3,y] = tmp[p,2,y-1] * (1 - m) * gA + // young adults from last year that grew
-            tmp[p,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
-            tmp[p-1, 3, y-1] * (1 - m) * spill; // dispersal from patch below
-          }
+          // p = np
+          
+            tmp[np,3,y] = tmp[np,2,y-1] * (1 - m) * gA + // young adults from last year that grew
+            tmp[np,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
+            tmp[np-1, 3, y-1] * (1 - m) * spill; // dispersal from patch below
           
           // general case for non-edge patches
-          else{
+          for(p in 2:(np-1)){
             tmp[p,3,y] = tmp[p,2,y-1] * (1 - m) * gA + // young adults from last year that grew
             tmp[p,3,y-1] * (1 - m) * (1 - 2*spill) + // adults from last year that survived, minus those that dispersed to two patches
             tmp[p-1, 3, y-1] * (1 - m) * spill + //dispersal from patch below
             tmp[p+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
           }
           
-          tmp[p,3,y] = tmp[p,2,y-1] * (1 - m) * gA + tmp[p,3,y-1] * (1 - m); 
-          
+          // fill in pp_n_p_s_y_hat
+          for(p in 1:np){
           pp_n_p_s_y_hat[p, 1:ns, y] = tmp[p,1:ns,y];
+          } // close pp patches
+          
+        } // close year loop
           
           // fit multinomial to all stages, not really needed except to add noise from sub-sampling
           
           // pp_proj_n_p_s_y_hat[p, 1:ns, y] = multinomial_rng(to_vector(tmp[p, 1:ns, y]) / sum(to_vector(tmp[p, 1:ns, y])), 100);
           
-        } // close proj loop
-        
-      } // close patch loop
-      
-      
       // generate posterior predictives for the testing data aka project recruitment deviates into the future
       
       for(p in 1:np){
@@ -252,8 +257,10 @@ generated quantities{
       
       // separate loop for projecting pop because we added stage structure
       
-      for(p in 1:np){
         for(y in 2:ny_proj){
+          
+          
+      for(p in 1:np){
           
           // project stage 1 (recruitment)
           tmp_proj[p, 1, y] = neg_binomial_2_rng(mean_recruits[p] * exp(rec_dev_proj[p, y-1]),phi_obs); // not sure if this is in the same units as n_p_s_y_hat anymore... double-check this! adding in observation error for number of recruits AF: changed from sigma_obs to phi_obs
@@ -262,38 +269,42 @@ generated quantities{
           
           
           tmp_proj[p,2,y] = tmp_proj[p,1,y-1] * (1 - m) * gY + tmp_proj[p,2,y-1] * (1 - m) * (1 - gA); 
+      } // close patch loop
           
           // adult dispersal
           
-          if(p==1){
-            tmp_proj[p,3,y] = tmp_proj[p,2,y-1] * (1 - m) * gA + // young adults from last year that grew
-            tmp_proj[p,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
-            tmp_proj[p+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
-          }
+          // p = 1
+            tmp_proj[1,3,y] = tmp_proj[1,2,y-1] * (1 - m) * gA + // young adults from last year that grew
+            tmp_proj[1,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
+            tmp_proj[1+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
           
-          else if(p==np){
-            tmp_proj[p,3,y] = tmp_proj[p,2,y-1] * (1 - m) * gA + // young adults from last year that grew
-            tmp_proj[p,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
-            tmp_proj[p-1, 3, y-1] * (1 - m) * spill; // dispersal from patch below
-          }
+          
+          // p = np
+            tmp_proj[np,3,y] = tmp_proj[np,2,y-1] * (1 - m) * gA + // young adults from last year that grew
+            tmp_proj[np,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
+            tmp_proj[np-1, 3, y-1] * (1 - m) * spill; // dispersal from patch below
+          
           
           // general case for non-edge patches
-          else{
+          for(p in 2:(np-1)){
             tmp_proj[p,3,y] = tmp_proj[p,2,y-1] * (1 - m) * gA + // young adults from last year that grew
             tmp_proj[p,3,y-1] * (1 - m) * (1 - 2*spill) + // adults from last year that survived, minus those that dispersed to two patches
             tmp_proj[p-1, 3, y-1] * (1 - m) * spill + //dispersal from patch below
             tmp_proj[p+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
-          }          
+          }         // close patches 
           
           
           // fit multinomial to all stages: no need for this except to simulate the slight addition of error from subsampling the numbers at age
           
+          for(p in 1:np){
+          
           pp_proj_n_p_s_y_hat[p, 1:ns, y] = tmp_proj[p,1:ns,y];
+          
+          } // close patches for pp_proj
           
           // pp_proj_n_p_s_y_hat[p, 1:ns, y] = multinomial_rng(to_vector(tmp[p, 1:ns, y]) / sum(to_vector(tmp[p, 1:ns, y])), 100);
           
-        } // close proj loop
+        } // close year loop
         
-      } // close patch loop
 } // close generated quantities
 
