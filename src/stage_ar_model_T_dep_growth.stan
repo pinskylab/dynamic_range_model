@@ -168,9 +168,12 @@ generated quantities{
   
   real rec_dev_proj[np, ny_proj - 1];
   
+    int y_sum; // because gA and gY are passed in as one matrix each for both the testing and training periods, we need to index along them as a sum of the testing year plus the whole training period
+  
   pp_n_p_s_y_hat[1:np, 1:ns, 1] = n_p_s_y[1:np,1:ns,1]; // initialize posterior predictive for training data with real starting pop
   
   tmp[1:np, 1:ns, 1] = n_p_s_y[1:np,1:ns,1]; // initialize posterior predictive for training data with real starting pop
+  
   
   // generate posterior predictives for training data
   
@@ -258,6 +261,7 @@ generated quantities{
       
       for(y in 2:ny_proj){
         
+        y_sum = y + ny; 
         
         for(p in 1:np){
           
@@ -267,26 +271,26 @@ generated quantities{
           // project other stages
           
           
-          tmp_proj[p,2,y] = tmp_proj[p,1,y-1] * (1 - m) * gY[p,y] + tmp_proj[p,2,y-1] * (1 - m) * (1 - gA[p,y]); 
+          tmp_proj[p,2,y] = tmp_proj[p,1,y-1] * (1 - m) * gY[p,y_sum] + tmp_proj[p,2,y-1] * (1 - m) * (1 - gA[p,y_sum]); 
         } // close patch loop
         
         // adult dispersal
         
         // p = 1
-        tmp_proj[1,3,y] = tmp_proj[1,2,y-1] * (1 - m) * gA[1,y] + // young adults from last year that grew
+        tmp_proj[1,3,y] = tmp_proj[1,2,y-1] * (1 - m) * gA[1,y_sum] + // young adults from last year that grew
         tmp_proj[1,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
         tmp_proj[1+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
         
         
         // p = np
-        tmp_proj[np,3,y] = tmp_proj[np,2,y-1] * (1 - m) * gA[np,y] + // young adults from last year that grew
+        tmp_proj[np,3,y] = tmp_proj[np,2,y-1] * (1 - m) * gA[np,y_sum] + // young adults from last year that grew
         tmp_proj[np,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
         tmp_proj[np-1, 3, y-1] * (1 - m) * spill; // dispersal from patch below
         
         
         // general case for non-edge patches
         for(p in 2:(np-1)){
-          tmp_proj[p,3,y] = tmp_proj[p,2,y-1] * (1 - m) * gA[p,y] + // young adults from last year that grew
+          tmp_proj[p,3,y] = tmp_proj[p,2,y-1] * (1 - m) * gA[p,y_sum] + // young adults from last year that grew
           tmp_proj[p,3,y-1] * (1 - m) * (1 - 2*spill) + // adults from last year that survived, minus those that dispersed to two patches
           tmp_proj[p-1, 3, y-1] * (1 - m) * spill + //dispersal from patch below
           tmp_proj[p+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
