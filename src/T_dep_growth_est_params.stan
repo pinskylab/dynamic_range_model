@@ -26,6 +26,8 @@ data {
   
   real sst_proj[np, ny_proj]; // temperature data for testing 
   
+  real m;
+  
   
 }
 
@@ -36,7 +38,7 @@ transformed data{
 
 parameters{
   
-  real<lower=0,upper=1> m; // mortality 
+//  real<lower=0,upper=1> m; // mortality 
   
   real<lower=0> width; // sensitivity to temperature variation
   
@@ -140,11 +142,11 @@ transformed parameters{
 
 model {
   
-  m ~ uniform(0.1, 0.9); // we probably shouldn't put a uniform prior on this ... 
+//  m ~ uniform(0.1, 0.9); // we probably shouldn't put a uniform prior on this ... 
   
-  Topt ~ normal(10, 10); // research for each species eventually
+  Topt ~ normal(18, 10); // research for each species eventually
   
-  width ~ normal(5, 5); 
+  width ~ normal(5, 3); 
   
   log_sigma_r ~ normal(log(.5),.1); // process error prior
   
@@ -161,7 +163,8 @@ model {
   // 
   //   
   // print("mean recruits are ", mean_recruits[12]);
-  
+  print("Topt is ", Topt);
+  print("width is ", width);
   
   for(y in 2:ny) {
     

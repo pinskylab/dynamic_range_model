@@ -157,7 +157,8 @@ stage_data <- list(
   ny = years_train,
   n_p_s_y = pop[,,1:years_train],
   proj_init = pop[,,years_train],
-  ny_proj = years_proj
+  ny_proj = years_proj,
+  m=0.2
 )
 
 warmups <- 1000
@@ -178,7 +179,9 @@ stage_model_fit <- stan(file = here::here("src","T_dep_growth_est_params.stan"),
            cores = n_cores,
            refresh = 250,
            control = list(max_treedepth = max_treedepth,
-                          adapt_delta = 0.95))
+                          adapt_delta = 0.95),
+           algorithm = "Fixed_param"
+           )
 
 
 ```
