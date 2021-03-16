@@ -1,7 +1,7 @@
 functions {
   
   real growth(real sst, real Topt, real width){
-    return exp(-0.5 * ((sst - Topt)/width)^2); // Gaussian temperature-dependent growth function; growth = 1 at tTopt
+    return exp(-0.5 * ((sst - Topt)/width)^2); // Gaussian temperature-dependent growth function; growth = 1 at Topt
   }
   
 }
@@ -26,7 +26,11 @@ data {
   
   real sst_proj[np, ny_proj]; // temperature data for testing 
   
-  real m;
+  //real m;
+  
+  // real Topt;
+  
+  //real width;
   
   
 }
@@ -38,7 +42,7 @@ transformed data{
 
 parameters{
   
-//  real<lower=0,upper=1> m; // mortality 
+  real<lower=0,upper=1> m; // mortality 
   
   real<lower=0> width; // sensitivity to temperature variation
   
@@ -77,6 +81,16 @@ transformed parameters{
   
   n_p_s_y_hat[1:np,1:ns,1] = n_p_s_y[1:np,1:ns,1]; // initialize population with "known" values
   
+  // temperature-dependent growth
+  // can this be vectorized?
+  for(y in 1:ny){
+    for(p in 1:np){
+      gA[p,y] = growth(sst[p,y], Topt, width);
+      gY[p,y] = growth(sst[p,y], Topt, width);
+      
+      // print("growth is ", gA[p,y]);
+    }
+  }
   
   for (y in 2:ny){
     
@@ -130,23 +144,16 @@ transformed parameters{
     
   } // close years
   
-  // can this be vectorized?
-  for(y in 1:ny){
-    for(p in 1:np){
-      gA[p,y] = growth(sst[p,y], Topt, width);
-      gY[p,y] = growth(sst[p,y], Topt, width);
-    }
-  }
   
 } // close transformed parameters block
 
 model {
   
-//  m ~ uniform(0.1, 0.9); // we probably shouldn't put a uniform prior on this ... 
+    m ~ uniform(0.05, 0.95); // we probably shouldn't put a uniform prior on this ... 
   
   Topt ~ normal(18, 10); // research for each species eventually
   
-  width ~ normal(5, 3); 
+    width ~ normal(5, 3); 
   
   log_sigma_r ~ normal(log(.5),.1); // process error prior
   
@@ -163,8 +170,8 @@ model {
   // 
   //   
   // print("mean recruits are ", mean_recruits[12]);
-  print("Topt is ", Topt);
-  print("width is ", width);
+//  print("Topt is ", Topt);
+  //  print("width is ", width);
   
   for(y in 2:ny) {
     

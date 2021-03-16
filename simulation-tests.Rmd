@@ -157,8 +157,7 @@ stage_data <- list(
   ny = years_train,
   n_p_s_y = pop[,,1:years_train],
   proj_init = pop[,,years_train],
-  ny_proj = years_proj,
-  m=0.2
+  ny_proj = years_proj
 )
 
 warmups <- 1000
@@ -173,15 +172,41 @@ n_cores <- 4
 
 stage_model_fit <- stan(file = here::here("src","T_dep_growth_est_params.stan"), # check that it's the right model!
            data = stage_data,
-           chains = 1, # add more later
-           warmup = 1,
+           chains = n_chains,
+           warmup = warmups,
            iter = total_iterations,
            cores = n_cores,
            refresh = 250,
            control = list(max_treedepth = max_treedepth,
-                          adapt_delta = 0.95),
-           algorithm = "Fixed_param"
+                          adapt_delta = 0.95)
            )
 
+mean_recruits_hat <- tidybayes::gather_draws(stage_model_fit, mean_recruits[patch], n = 1000)
+
+mean_recruits <- tibble(patch = 1:patches, mean_recruits = mean_rec)
+
+mean_recruits %>% 
+  ggplot() + 
+  geom_boxplot(data = mean_recruits_hat, aes(patch, .value, group = patch)) +
+  geom_point(aes(patch, mean_recruits, color = "true"), size = 2) + 
+  scale_y_continuous(name = "Mean Recruits") + 
+  scale_x_continuous(name = "Patch")
+
+n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, n_p_s_y_hat[patch, stage,year], n = 1000)
+
+pp_n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_n_p_s_y_hat[patch, stage,year], n = 1000)
+
+pp_proj_n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_proj_n_p_s_y_hat[patch, stage,year], n = 1000)
+
+Topt_hat <- tidybayes::gather_draws(stage_model_fit, Topt, n=1000)
+
+n_p_s_y <- pop[,,1:years_train] %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
+
+
+n_p_s_y_proj <- pop[,,(years_train+1):years] %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
 
 ```
