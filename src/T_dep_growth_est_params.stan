@@ -149,11 +149,11 @@ transformed parameters{
 
 model {
   
-    m ~ uniform(0.05, 0.95); // we probably shouldn't put a uniform prior on this ... 
+    m ~ normal(0.2, 0.1); 
   
-  Topt ~ normal(18, 10); // research for each species eventually
+  Topt ~ normal(18, 4);
   
-    width ~ normal(5, 3); 
+    width ~ normal(4, 2); 
   
   log_sigma_r ~ normal(log(.5),.1); // process error prior
   

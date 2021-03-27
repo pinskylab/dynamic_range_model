@@ -1,5 +1,12 @@
+functions {
+
+real T_dep(real sst, real Topt, real width){
+   return exp(-0.5 * ((sst - Topt)/width)^2); // gussian temperature-dependent function
+ }
+  
+}
+
 data {
-  real m; // natural mortality
   
   real spill; //spillover rate between adjacent patches
   
@@ -15,9 +22,14 @@ data {
   
   int ny_proj; // number of years to forecast 
   
-  matrix[np, ny+ny_proj] gY; // growth rate juveniles -> young adults, for both the training and testing sets
+  real sst[np, ny]; // temperature data for training
   
-  matrix[np, ny+ny_proj] gA; // growth rate young adults -> adults
+  real sst_proj[np, ny_proj]; // temperature data for testing 
+  
+  real g; // do we want to estimate these at all? 
+  
+  real m;  
+  
 }
 
 transformed data{
@@ -26,6 +38,10 @@ transformed data{
 }
 
 parameters{
+  
+  real<lower=0> width; // sensitivity to temperature variation
+  
+  real Topt; //  temp at which recruitment is maximized
   
   real log_sigma_r; // sigma recruits
   
@@ -36,11 +52,13 @@ parameters{
   matrix[np,ny-1] raw; // array of raw recruitment deviates
   
   //  real<lower = 1e-3> sigma_obs;
-  real<lower=0> phi_obs; // I thought it was possible for this parameter to be negative, but at one point got this error: Exception: neg_binomial_2_lpmf: Precision parameter is -0.317205, but must be > 0!  (in 'model1ee6785925e9_stage_ar_model_adult_dispersal' at line 145)
+  real<lower=0> phi_obs; // I thought it was possible for this parameter to be negtive, but at one point got this error: Exception: neg_binomial_2_lpmf: Precision parameter is -0.317205, but must be > 0!  (in 'model1ee6785925e9_stage_ar_model_adult_dispersal' at line 145)
   
 }
 
 transformed parameters{
+  
+  real T_adjust[np, ny]; 
   
   real<lower=0> sigma_r;
   
@@ -56,28 +74,33 @@ transformed parameters{
   
   n_p_s_y_hat[1:np,1:ns,1] = n_p_s_y[1:np,1:ns,1]; // initialize population with "known" values
   
+  for(p in 1:np){
+    for(y in 1:ny){
+      T_adjust[p,y] = T_dep(sst[p,y], Topt, width); // calculate temperature-dependence correction factor for each patch and year depending on SST 
+    }
+  }
   
   for (y in 2:ny){
     
     for (p in 1:np){
       
-      if (y == 2){
+      if (y == 2){ 
         
-        rec_dev[p,y-1]  =  raw[p,1];
+        rec_dev[p,y-1]  =  raw[p,1]; // initialize first year of rec_dev with raw (process error)
         
       } 
       else {
         
-        rec_dev[p,y-1] = -pow(sigma_r,2)/2 + alpha *  (rec_dev[p,y-2] - -pow(sigma_r,2)/2) + raw[p,y-1];
+        rec_dev[p,y-1] = -pow(sigma_r,2)/2 + alpha *  (rec_dev[p,y-2] - -pow(sigma_r,2)/2) + raw[p,y-1]; // why the double minus signs here? 
         
         
       } // close ifelse
       
       // note life stages are now hard-coded by number, not indexed by s here
       
-      n_p_s_y_hat[p,1,y] = mean_recruits[p] * exp(rec_dev[p,y-1]);
+      n_p_s_y_hat[p,1,y] = mean_recruits[p] * exp(rec_dev[p,y-1]) * T_adjust[p,y]; //added in T-dependence here
       
-      n_p_s_y_hat[p,2,y] = n_p_s_y_hat[p,1,y-1] * (1 - m) * gY[p,y] + n_p_s_y_hat[p,2,y-1] * (1 - m) * (1 - gA[p,y]); // AF: got rid of exp(-m) here 
+      n_p_s_y_hat[p,2,y] = n_p_s_y_hat[p,1,y-1] * (1 - m) * g + n_p_s_y_hat[p,2,y-1] * (1 - m) * (1 - g); // AF: got rid of exp(-m) here 
       
     } // close patches for stages 1 and 2
     
@@ -86,20 +109,20 @@ transformed parameters{
     // this used to be in a for loop over all p but it caused some syntax issues, so it's hard-coded for the edge patches now 
     
     // p = 1 case 
-    n_p_s_y_hat[1,3,y] = n_p_s_y_hat[1,2,y-1] * (1 - m) * gA[1,y] + n_p_s_y_hat[1,3,y-1] * (1 - m) * (1 - spill) + n_p_s_y_hat[2, 3, y-1] * (1 - m) * spill; 
+    n_p_s_y_hat[1,3,y] = n_p_s_y_hat[1,2,y-1] * (1 - m) * g + n_p_s_y_hat[1,3,y-1] * (1 - m) * (1 - spill) + n_p_s_y_hat[2, 3, y-1] * (1 - m) * spill; 
     // young adults from last year that grew
     // adults from last year that survived, minus those that dispersed to one patch only
     // dispersal from patch above
     
     // p = np case
-    n_p_s_y_hat[np,3,y] = n_p_s_y_hat[np,2,y-1] * (1 - m) * gA[np,y] + n_p_s_y_hat[np,3,y-1] * (1 - m) * (1 - spill) + n_p_s_y_hat[np-1, 3, y-1] * (1 - m) * spill;
+    n_p_s_y_hat[np,3,y] = n_p_s_y_hat[np,2,y-1] * (1 - m) * g + n_p_s_y_hat[np,3,y-1] * (1 - m) * (1 - spill) + n_p_s_y_hat[np-1, 3, y-1] * (1 - m) * spill;
     // young adults from last year that grew
     // adults from last year that survived, minus those that dispersed to one patch only
     // dispersal from patch below
     
     // general case for non-edge patches
     for(p in 2:(np-1)){
-      n_p_s_y_hat[p,3,y] = n_p_s_y_hat[p,2,y-1] * (1 - m) * gA[p,y] + n_p_s_y_hat[p,3,y-1] * (1 - m) * (1 - 2*spill) + n_p_s_y_hat[p-1, 3, y-1] * (1 - m) * spill + n_p_s_y_hat[p+1, 3, y-1] * (1 - m) * spill; 
+      n_p_s_y_hat[p,3,y] = n_p_s_y_hat[p,2,y-1] * (1 - m) * g + n_p_s_y_hat[p,3,y-1] * (1 - m) * (1 - 2*spill) + n_p_s_y_hat[p-1, 3, y-1] * (1 - m) * spill + n_p_s_y_hat[p+1, 3, y-1] * (1 - m) * spill; 
       // young adults from last year that grew
       // adults from last year that survived, minus those that dispersed to two patches
       //dispersal from patch below
@@ -109,9 +132,16 @@ transformed parameters{
     
   } // close years
   
+  
 } // close transformed parameters block
 
 model {
+  
+    m ~ normal(0.2, 0.1); 
+  
+  Topt ~ normal(18, 4);
+  
+    width ~ normal(4, 2); 
   
   log_sigma_r ~ normal(log(.5),.1); // process error prior
   
@@ -128,7 +158,8 @@ model {
   // 
   //   
   // print("mean recruits are ", mean_recruits[12]);
-  
+//  print("Topt is ", Topt);
+  //  print("width is ", width);
   
   for(y in 2:ny) {
     
@@ -168,7 +199,13 @@ generated quantities{
   
   real rec_dev_proj[np, ny_proj - 1];
   
-    int y_sum; // because gA and gY are passed in as one matrix each for both the testing and training periods, we need to index along them as a sum of the testing year plus the whole training period
+  real T_adjust_proj[np, ny_proj];
+  
+  for(p in 1:np){
+    for(y in 1:ny_proj){
+      T_adjust_proj[p,y] = T_dep(sst_proj[p,y], Topt, width); // calculate temperature-dependence correction factor for each patch and year depending on SST 
+    }
+  }
   
   pp_n_p_s_y_hat[1:np, 1:ns, 1] = n_p_s_y[1:np,1:ns,1]; // initialize posterior predictive for training data with real starting pop
   
@@ -198,26 +235,26 @@ generated quantities{
           
           // derterministically fill in the rest of the numbers at stage
           
-          tmp[p,2,y] = tmp[p,1,y-1] * (1 - m) * gY[p,y] + tmp[p,2,y-1] * (1 - m) * (1 - gA[p,y]); 
+          tmp[p,2,y] = tmp[p,1,y-1] * (1 - m) * g + tmp[p,2,y-1] * (1 - m) * (1 - g); 
           
         } // close patch loop for stages 1 and 2
         
         // adult dispersal
         
         // p = 1
-        tmp[1,3,y] = tmp[1,2,y-1] * (1 - m) * gA[1,y] + // young adults from last year that grew
+        tmp[1,3,y] = tmp[1,2,y-1] * (1 - m) * g + // young adults from last year that grew
         tmp[1,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
         tmp[1+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
         
         // p = np
         
-        tmp[np,3,y] = tmp[np,2,y-1] * (1 - m) * gA[np,y] + // young adults from last year that grew
+        tmp[np,3,y] = tmp[np,2,y-1] * (1 - m) * g + // young adults from last year that grew
         tmp[np,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
         tmp[np-1, 3, y-1] * (1 - m) * spill; // dispersal from patch below
         
         // general case for non-edge patches
         for(p in 2:(np-1)){
-          tmp[p,3,y] = tmp[p,2,y-1] * (1 - m) * gA[p,y] + // young adults from last year that grew
+          tmp[p,3,y] = tmp[p,2,y-1] * (1 - m) * g + // young adults from last year that grew
           tmp[p,3,y-1] * (1 - m) * (1 - 2*spill) + // adults from last year that survived, minus those that dispersed to two patches
           tmp[p-1, 3, y-1] * (1 - m) * spill + //dispersal from patch below
           tmp[p+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
@@ -236,10 +273,18 @@ generated quantities{
       
       // generate posterior predictives for the testing data aka project recruitment deviates into the future
       
+      // left over from when gA/gY was T-dependent
+      // for(p in 1:np){
+      //   for(y in 1:ny_proj){
+      //     gA_proj[p,y] = growth(sst_proj[p, y], Topt, width);
+      //     gY_proj[p,y] = growth(sst_proj[p, y], Topt, width);
+      //   }
+      // }
+      
       for(p in 1:np){
         for(y in 2:ny_proj){
           
-          if (y == 2){ // should this be year 1?
+          if (y == 2){
             rec_dev_proj[p, y-1]  = rec_dev[p, y-1]; // initiate projections with last estimated process errors
           }
           else{
@@ -261,36 +306,34 @@ generated quantities{
       
       for(y in 2:ny_proj){
         
-        y_sum = y + ny; 
-        
         for(p in 1:np){
           
           // project stage 1 (recruitment)
-          tmp_proj[p, 1, y] = neg_binomial_2_rng(mean_recruits[p] * exp(rec_dev_proj[p, y-1]),phi_obs); // not sure if this is in the same units as n_p_s_y_hat anymore... double-check this! adding in observation error for number of recruits AF: changed from sigma_obs to phi_obs
+          tmp_proj[p, 1, y] = neg_binomial_2_rng(mean_recruits[p] * exp(rec_dev_proj[p, y-1]) * T_adjust_proj[p, y],phi_obs); // added in T-dependence here 
           
           // project other stages
           
           
-          tmp_proj[p,2,y] = tmp_proj[p,1,y-1] * (1 - m) * gY[p,y_sum] + tmp_proj[p,2,y-1] * (1 - m) * (1 - gA[p,y_sum]); 
+          tmp_proj[p,2,y] = tmp_proj[p,1,y-1] * (1 - m) * g + tmp_proj[p,2,y-1] * (1 - m) * (1 - g); 
         } // close patch loop
         
         // adult dispersal
         
         // p = 1
-        tmp_proj[1,3,y] = tmp_proj[1,2,y-1] * (1 - m) * gA[1,y_sum] + // young adults from last year that grew
+        tmp_proj[1,3,y] = tmp_proj[1,2,y-1] * (1 - m) * g + // young adults from last year that grew
         tmp_proj[1,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
         tmp_proj[1+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
         
         
         // p = np
-        tmp_proj[np,3,y] = tmp_proj[np,2,y-1] * (1 - m) * gA[np,y_sum] + // young adults from last year that grew
+        tmp_proj[np,3,y] = tmp_proj[np,2,y-1] * (1 - m) * g + // young adults from last year that grew
         tmp_proj[np,3,y-1] * (1 - m) * (1 - spill) + // adults from last year that survived, minus those that dispersed to one patch only
         tmp_proj[np-1, 3, y-1] * (1 - m) * spill; // dispersal from patch below
         
         
         // general case for non-edge patches
         for(p in 2:(np-1)){
-          tmp_proj[p,3,y] = tmp_proj[p,2,y-1] * (1 - m) * gA[p,y_sum] + // young adults from last year that grew
+          tmp_proj[p,3,y] = tmp_proj[p,2,y-1] * (1 - m) * g + // young adults from last year that grew
           tmp_proj[p,3,y-1] * (1 - m) * (1 - 2*spill) + // adults from last year that survived, minus those that dispersed to two patches
           tmp_proj[p-1, 3, y-1] * (1 - m) * spill + //dispersal from patch below
           tmp_proj[p+1, 3, y-1] * (1 - m) * spill; // dispersal from patch above
