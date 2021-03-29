@@ -232,11 +232,16 @@ alpha <- 0.5
 
 sigma_r <- 0.2
 
-mean_rec <- rlnorm(patches, log(50),0.5) # made this mean bigger to compensate for depressing estimated recruitment with T-dependence, and turned down the variance, because otherwise the plots didn't look like nice temperature-dependent pop dy 
+# upgrading mean_rec to vary with time as well as patch -- otherwise the temperature-dependent recruitment is too heavily influenced by the values it draws 
+mean_rec <- array(NA, dim = c(patches, years))
 
-n0 <- mean_rec * matrix(rep(exp(-m * (0:(stages - 1))),patches), nrow = patches, ncol = stages, byrow = TRUE)
+for(y in 1:years){
+  mean_rec[,y] <- rlnorm(patches, log(50),0.5) 
+} # made this mean bigger to compensate for depressing estimated recruitment with T-dependence, and turned down the variance, because otherwise the plots didn't look like nice temperature-dependent pop dy 
 
-width <- 6 # sensitivity to temperature variation 
+n0 <- mean_rec[,1] * matrix(rep(exp(-m * (0:(stages - 1))),patches), nrow = patches, ncol = stages, byrow = TRUE)
+
+width <- 4 # sensitivity to temperature variation 
 
 sstopt <- 18 # temp at which recruitment is maximized
 
@@ -270,7 +275,7 @@ pop[,,1] <- round(n0) # initialize first year
 for (y in 2:years){
   for(p in 1:patches) {
     # recruits
-    pop[,1,y] <- round(mean_rec * exp(rnorm(patches,-sigma_r^2/2, sigma_r)) * T_adjust[p,y]) # adding temperature dependence. 
+    pop[,1,y] <- round(mean_rec[p,y] * exp(rnorm(patches,-sigma_r^2/2, sigma_r)) * T_adjust[p,y]) # adding temperature dependence. 
     
     # young adults / large juvs
     pop[p,2,y] <- round(pop[p,1,y-1] * (1 - m) * g) + # recruits, less mortality, plus growth into this stage
