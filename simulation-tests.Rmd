@@ -211,7 +211,7 @@ n_p_s_y_proj <- pop[,,(years_train+1):years] %>%
 
 ```
 
-Because that didn't work very well without very tight priors and/or continuing to treat parameters as known, let's change the process model so that recruitment, not growth, is temperature-dependent. Take Two:
+Because that didn't work very well without very tight priors and/or continuing to treat parameters as known, let's change the process model so that recruitment, not growth, is temperature-dependent. I'm also making the process error constant across patches, and the mean recruits constant over all space and time. Take Two:
 
 ## Fit a model with temperature-dependent recruitment (m, g fixed)
 
@@ -230,16 +230,19 @@ years_proj <- 20
 
 alpha <- 0.5
 
-sigma_r <- 0.2
+sigma_r <- 0.1 # turned this down 
 
 # upgrading mean_rec to vary with time as well as patch -- otherwise the temperature-dependent recruitment is too heavily influenced by the values it draws 
-mean_rec <- array(NA, dim = c(patches, years))
+#mean_rec <- array(NA, dim = c(patches, years))
 
-for(y in 1:years){
-  mean_rec[,y] <- rlnorm(patches, log(50),0.5) 
-} # made this mean bigger to compensate for depressing estimated recruitment with T-dependence, and turned down the variance, because otherwise the plots didn't look like nice temperature-dependent pop dy 
+# for(y in 1:years){
+#   mean_rec[,y] <- rlnorm(patches, log(50),0.5) 
+# } # made this mean bigger to compensate for depressing estimated recruitment with T-dependence, and turned down the variance, because otherwise the plots didn't look like nice temperature-dependent pop dy 
 
-n0 <- mean_rec[,1] * matrix(rep(exp(-m * (0:(stages - 1))),patches), nrow = patches, ncol = stages, byrow = TRUE)
+# let's try just one mean_rec
+mean_rec = rlnorm(1, log(50),0.5) 
+
+n0 <- mean_rec * matrix(rep(exp(-m * (0:(stages - 1))),patches), nrow = patches, ncol = stages, byrow = TRUE)
 
 width <- 4 # sensitivity to temperature variation 
 
@@ -272,10 +275,13 @@ pop <- array(NA, dim = c(patches, stages, years))
 
 pop[,,1] <- round(n0) # initialize first year  
 
+rec_dev <- array(NA, dim=years)
+
 for (y in 2:years){
+  rec_dev[y] <- exp(rnorm(1,-sigma_r^2/2, sigma_r))
   for(p in 1:patches) {
     # recruits
-    pop[,1,y] <- round(mean_rec[p,y] * exp(rnorm(patches,-sigma_r^2/2, sigma_r)) * T_adjust[p,y]) # adding temperature dependence. 
+    pop[p,1,y] <- round(mean_rec * rec_dev[y] * T_adjust[p,y]) # adding temperature dependence. 
     
     # young adults / large juvs
     pop[p,2,y] <- round(pop[p,1,y-1] * (1 - m) * g) + # recruits, less mortality, plus growth into this stage
