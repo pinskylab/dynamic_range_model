@@ -211,6 +211,8 @@ n_p_s_y_proj <- pop[,,(years_train+1):years] %>%
 
 ```
 
+# Taking parameters as known 
+
 Because that didn't work very well without very tight priors and/or continuing to treat parameters as known, let's change the process model so that recruitment, not growth, is temperature-dependent. I'm also making the process error constant across patches, and the mean recruits constant over all space and time. Take Two:
 
 ## Fit a model with temperature-dependent recruitment (m, g fixed)
