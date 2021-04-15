@@ -7,6 +7,16 @@ output:
   html_document: default
 ---
 
+```{r packages}
+set.seed(42)
+library(tidyverse)
+library(tidybayes)
+library(Cairo)
+library(here)
+
+library(rstan)
+```
+
 This document can be considered a sequel to `stage-simulation.Rmd`, where we developed a "minimum viable product" process model with all parameters input as data. This also means the calculation of growth rates as a function of temperature happens in the Stan model code, not in the R code (where we previously just calculated the growth rate). 
 
 # Estimating unknown parameters
@@ -25,15 +35,6 @@ Some notes on this model:
 * Should growth rates be lagged by a year?
 * Not estimating spillover yet 
 
-```{r packages}
-set.seed(42)
-library(tidyverse)
-library(tidybayes)
-
-library(here)
-
-library(rstan)
-```
 
 
 ```{r simulate data}
@@ -373,16 +374,16 @@ stage_model_fit <- stan(file = here::here("src","T_dep_rec.stan"), # check that 
                           adapt_delta = 0.95)
            )
 
-mean_recruits_hat <- tidybayes::gather_draws(stage_model_fit, mean_recruits[patch], n = 1000)
+mean_recruits_hat <- tidybayes::gather_draws(stage_model_fit, mean_recruits, n = 1000) # used to be mean_recruits[patch]
 
-mean_recruits <- tibble(patch = 1:patches, mean_recruits = mean_rec)
+#mean_recruits <- tibble(patch = 1:patches, mean_recruits = mean_rec)
 
-mean_recruits %>% 
-  ggplot() + 
-  geom_boxplot(data = mean_recruits_hat, aes(patch, .value, group = patch)) +
-  geom_point(aes(patch, mean_recruits, color = "true"), size = 2) + 
-  scale_y_continuous(name = "Mean Recruits") + 
-  scale_x_continuous(name = "Patch")
+# mean_recruits %>% 
+#   ggplot() + 
+#   geom_boxplot(data = mean_recruits_hat, aes(patch, .value, group = patch)) +
+#   geom_point(aes(patch, mean_recruits, color = "true"), size = 2) + 
+#   scale_y_continuous(name = "Mean Recruits") + 
+#   scale_x_continuous(name = "Patch")
 
 n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, n_p_s_y_hat[patch, stage,year], n = 1000)
 
@@ -401,4 +402,44 @@ n_p_s_y_proj <- pop[,,(years_train+1):years] %>%
   reshape::melt(varnames = c("patch","stage","year")) %>% 
   as_tibble() 
 
+```
+
+## Evaluate the model 
+
+```{r}
+
+gg_n_p_s_y_hat <- n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer() +
+  labs(title="model predictions")
+
+# posterior predictive fits
+gg_pp_n_p_s_y_hat <- pp_n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer()+
+  labs(title="posterior predictive fit")
+
+# forecast fits
+gg_pp_proj_n_p_s_y_hat <- pp_proj_n_p_s_y_hat %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y_proj, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer() +
+  labs(title="forecast")
+
+gg_n_p_s_y_hat
+gg_pp_n_p_s_y_hat
+gg_pp_proj_n_p_s_y_hat
+
+
+ggsave(gg_n_p_s_y_hat, filename=here("results","T_dep_rec_fit.png"), width=7, height=10)
+ggsave(gg_pp_n_p_s_y_hat, filename=here("results","T_dep_rec_pp.png"), width=7, height=10)
+ggsave(gg_pp_proj_n_p_s_y_hat, filename=here("results","T_dep_rec_proj.png"), width=7, height=10)
 ```
