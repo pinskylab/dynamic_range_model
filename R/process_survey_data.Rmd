@@ -185,7 +185,7 @@ Generating the same datasets for the other three focal species, in order to visu
 ```{r summer flounder,  eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
 fluke_neus_len <- neus_len %>% filter(spp=="Paralichthys dentatus")
 
-fluke_lm <- 28 # FOR EXPLORATORY PURPOSES ONLY! FROM FISHBASE--REVISIT THIS
+fluke_lm <- 27 # p64 SAW 66
 fluke_ljuv <- min(fluke_neus_len$LENGTH) + (fluke_lm - min(fluke_neus_len$LENGTH))/2
 
 fluke_neus_len_agg <- fluke_neus_len %>%
