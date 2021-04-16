@@ -183,7 +183,7 @@ Generating the same datasets for the other three focal species, in order to visu
 **Revisit break points for size classes and data inputs for these three!**
 
 ```{r summer flounder,  eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
-fluke_neus_len <- neus_len %>% filter(spp=="Paralichthys dentatus")
+fluke_neus_len <- neus_len %>% filter(spp=="Paralichthys dentatus", LENGTH>5) # getting rid of  a single fish at 4cm that was throwing off the stage 1/2 breakpoint--after that there are a decent number of 9, 10, 11... cm fish
 
 fluke_lm <- 27 # p64 SAW 66
 fluke_ljuv <- min(fluke_neus_len$LENGTH) + (fluke_lm - min(fluke_neus_len$LENGTH))/2
