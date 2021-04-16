@@ -182,11 +182,34 @@ Generating the same datasets for the other three focal species, in order to visu
 
 **Revisit break points for size classes and data inputs for these three!**
 
+## Summer flounder
+
+I'm adding in the survey selectivity correction before transforming lengths to classes, because that's how Mark communicated it to me:
+
+The current assessment model provides estimates of NEFSC HB Bigelow survey selectivity at age for 2009-2019.
+For spring: age 0 = 0.00, age 1 = 0.75, age 2 = 0.80, age 3-7+ = 1.00 
+For fall:      age 0 = 0.72, age 1 = 0.80, age 2 = 1.00, age 3-7+ = 1.00
+
+As a rough estimation of how ages relate to lengths:
+In the spring no age 0 fish are caught, age 1 fish are generally < 36 cm, age 2 fish are 36 - 40 cm, and age 3 fish are > 40 cm.
+In the fall, age 0 fish are < 30 cm, age 1 fish are 30-40 cm, age 2 fish are 41-45 cm, and age 3 fish are > 45 cm.
+
 ```{r summer flounder,  eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
 fluke_neus_len <- neus_len %>% filter(spp=="Paralichthys dentatus", LENGTH>5) # getting rid of  a single fish at 4cm that was throwing off the stage 1/2 breakpoint--after that there are a decent number of 9, 10, 11... cm fish
 
 fluke_lm <- 27 # p64 SAW 66
 fluke_ljuv <- min(fluke_neus_len$LENGTH) + (fluke_lm - min(fluke_neus_len$LENGTH))/2
+
+# incorporating size selectivity
+fluke_neus_fall <- fluke_neus_len %>% 
+  left_join(dat_exploded_neus %>% select(region, haulid) %>% distinct(), by="haulid") %>% #to get seasons
+  filter(region=="Northeast US Spring") %>% 
+  mutate(numlen_correct = ifelse(LENGTH<36, NUMLEN*(1/0.75), ifelse(LENGTH<40, NUMLEN*(1/0.80), NUMLEN)))
+
+fluke_neus_spring <- fluke_neus_len %>% 
+  left_join(dat_exploded_neus %>% select(region, haulid) %>% distinct(), by="haulid") %>% #to get seasons
+  filter(region=="Northeast US Spring") %>% 
+  mutate(numlen_correct = ifelse(LENGTH<36, NUMLEN*(1/0.75), ifelse(LENGTH<40, NUMLEN*(1/0.80), NUMLEN)))
 
 fluke_neus_len_agg <- fluke_neus_len %>%
   mutate(lengthclass = ifelse(LENGTH <= fluke_ljuv, "smalljuv",
