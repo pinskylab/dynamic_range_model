@@ -1,0 +1,151 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r packages}
+set.seed(42)
+library(tidyverse)
+library(tidybayes)
+library(Cairo)
+library(here)
+library(magrittr)
+library(rstan)
+library(Matrix)
+```
+
+### Size selectivity
+
+Email from Mark Terceiro at NOAA:
+
+--
+The current assessment model provides estimates of NEFSC HB Bigelow survey selectivity at age for 2009-2019.
+For spring: age 0 = 0.00, age 1 = 0.75, age 2 = 0.80, age 3-7+ = 1.00 
+For fall:      age 0 = 0.72, age 1 = 0.80, age 2 = 1.00, age 3-7+ = 1.00
+
+As a rough estimation of how ages relate to lengths:
+In the spring no age 0 fish are caught, age 1 fish are generally < 36 cm, age 2 fish are 36 - 40 cm, and age 3 fish are > 40 cm.
+In the fall, age 0 fish are < 30 cm, age 1 fish are 30-40 cm, age 2 fish are 41-45 cm, and age 3 fish are > 45 cm.
+--
+
+We used an L50 of 27cm as the stage 2/3 breakpoint, following SAW 66. I haven't revisited whether we should change the breakpoint for stages 1 and 2, currently 18cm (halfway between 27cm and the min length 9cm). We could develop season-specific breakpoints, but if by fall the age 1 fish include some that are reproductive anyway, I think it's fine to start classifying those as stage 3 in our model.
+
+**Size selectivity is already accounted for in generating the prepped fluke data file.**
+ 
+### Mortality
+ 
+Stock assessment SAW66 page 20:
+Fishing mortality rates and stock sizes were estimated using the ASAP statistical catch at age model. An age-specific instantaneous natural mortality rate providing an average M = 0.25 was assumed for all years. Fishing mortality on the fully selected age 4 fish ranged between 0.744 and 1.622 during 1982-1996 and then decreased to 0.245 in 2007. Since 2007 the fishing mortality rate has increased and was 0.334 in 2017. The 90% confidence interval for F in 2017 was 0.276 to 0.380. 
+
+### Growth
+
+Summer flounder seem to reach reproductive size within three years -- actually, much faster -- so I've made the growth rate 1, indicating that the probability that individuals in a size class transition to the next one in any time step is 100%.
+
+```{r data}
+flukedat <- read_csv(here("processed-data","fluke_prepped_data.csv")) %>% 
+  filter(year>=1968) %>% 
+  mutate(latround = floor(lat))
+
+# keep only lat bands sampled every year
+latOK <- flukedat %>% 
+  select(latround, year) %>% 
+  distinct() %>% 
+    group_by(latround) %>% 
+  summarise(n=n()) %>% 
+  filter(n==max(n)) # NEED TO CHECK THAT THESE ARE CONTINUOUS AND MAKE SENSE
+
+flukedat %<>% filter(latround %in% latOK$latround)
+
+## get time dimension
+years <- sort(unique(flukedat$year)) # should we cut out pre-1968?
+ny <- length(years)
+years_train <- ny-10
+years_proj <- 10
+
+#get other dimensions
+patches <- sort(unique(flukedat$latround))
+np = length(patches) 
+ns=3
+
+# make temperature matrix
+sbtdat <- flukedat %>% 
+  group_by(latround, year) %>% 
+  summarise(sbt=mean(btemp, na.rm=TRUE)) %>% 
+  ungroup() %>% 
+  mutate(patch=as.integer(as.factor(latround)),
+         year=as.integer(as.factor(year))) %>% #change real values to indices
+  select(-latround)
+
+sbt <- as.matrix(with(sbtdat, sparseMatrix(patch, year, x=sbt))) 
+
+# make population matrix
+flukepop <- flukedat %>% 
+  group_by(year,latround, lengthclass) %>% 
+  summarise(count=sum(numlengthclass))%>% 
+  ungroup() %>% 
+  mutate(patch=as.integer(as.factor(latround)),
+         year=as.integer(as.factor(year)),
+         stage=recode(lengthclass, smalljuv=1, largejuv=2, adult=3),
+         count=floor(count)) %>% #change real values to indices and counts to integers (not sure if the latter is necessary)
+  select(-latround, -lengthclass)
+
+pop <- array(NA, dim = c(np, ns, ny)) 
+for(p in 1:np){
+  for(s in 1:ns){
+    for(y in 1:ny){
+      tmp <- flukepop %>% filter(patch==p, stage==s, year==y)
+      pop[p,s,y] <- tmp$count
+    }
+  }
+}
+
+# mortality
+m = 0.25
+f = 0.334
+z = m+f
+
+# growth
+g = 1
+
+#spillover
+spill=0.1
+```
+
+
+```{r fit T_dep_rec}
+
+stage_data <- list(
+  sst = sbt[, 1:years_train], # this isn't SST anymore, it's SBT... need to rename in model
+  sst_proj = sbt[, (years_train+1):ny],
+  spill = spill,
+  np = np,
+  ns = ns,
+  ny = years_train,
+  n_p_s_y = pop[,,1:years_train],
+  proj_init = pop[,,years_train],
+  ny_proj = years_proj, 
+  m = z,  # should rename model to Z at some point?
+  g = g
+)
+
+warmups <- 1000
+
+total_iterations <- 2000
+
+max_treedepth <-  12
+
+n_chains <-  4
+
+n_cores <- 4 
+
+stage_model_fit <- stan(file = here::here("src","T_dep_rec.stan"), # check that it's the right model!
+           data = stage_data,
+           chains = n_chains,
+           warmup = warmups,
+           iter = total_iterations,
+           cores = n_cores,
+           refresh = 250,
+           control = list(max_treedepth = max_treedepth,
+                          adapt_delta = 0.95)
+           )
+```
