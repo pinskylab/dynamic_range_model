@@ -102,7 +102,7 @@ for(p in 1:np){
 # mortality
 m = 0.25
 f = 0.334
-z = m+f
+z = exp(-m-f)
 
 # growth
 g = 1
@@ -138,7 +138,7 @@ n_chains <-  4
 
 n_cores <- 4 
 
-stage_model_fit <- stan(file = here::here("src","T_dep_rec.stan"), # check that it's the right model!
+stage_model_fit <- stan(file = here::here("src","T_dep_rec_fluke.stan"), # check that it's the right model!
            data = stage_data,
            chains = n_chains,
            warmup = warmups,
