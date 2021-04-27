@@ -199,23 +199,23 @@ fluke_neus_len <- neus_len %>% filter(spp=="Paralichthys dentatus", LENGTH>5) # 
 
 fluke_lm <- 27 # p64 SAW 66
 fluke_ljuv <- min(fluke_neus_len$LENGTH) + (fluke_lm - min(fluke_neus_len$LENGTH))/2
+# 
+# # incorporating size selectivity
+# fluke_neus_fall <- fluke_neus_len %>% 
+#   left_join(dat_exploded_neus %>% select(region, haulid) %>% distinct(), by="haulid") %>% #to get seasons
+#   filter(region=="Northeast US Fall") %>% 
+#   mutate(numlen_correct = ifelse(LENGTH<30, NUMLEN*(1/0.72), ifelse(LENGTH<40, NUMLEN*(1/0.80), NUMLEN)))
+# 
+# fluke_neus_spring <- fluke_neus_len %>% 
+#   left_join(dat_exploded_neus %>% select(region, haulid) %>% distinct(), by="haulid") %>% #to get seasons
+#   filter(region=="Northeast US Spring") %>% 
+#   mutate(numlen_correct = ifelse(LENGTH<36, NUMLEN*(1/0.75), ifelse(LENGTH<40, NUMLEN*(1/0.80), NUMLEN)))
 
-# incorporating size selectivity
-fluke_neus_fall <- fluke_neus_len %>% 
-  left_join(dat_exploded_neus %>% select(region, haulid) %>% distinct(), by="haulid") %>% #to get seasons
-  filter(region=="Northeast US Fall") %>% 
-  mutate(numlen_correct = ifelse(LENGTH<30, NUMLEN*(1/0.72), ifelse(LENGTH<40, NUMLEN*(1/0.80), NUMLEN)))
-
-fluke_neus_spring <- fluke_neus_len %>% 
-  left_join(dat_exploded_neus %>% select(region, haulid) %>% distinct(), by="haulid") %>% #to get seasons
-  filter(region=="Northeast US Spring") %>% 
-  mutate(numlen_correct = ifelse(LENGTH<36, NUMLEN*(1/0.75), ifelse(LENGTH<40, NUMLEN*(1/0.80), NUMLEN)))
-
-fluke_neus_len_agg <- bind_rows(fluke_neus_fall, fluke_neus_spring) %>%
+fluke_neus_len_agg <- fluke_neus_len %>%
   mutate(lengthclass = ifelse(LENGTH <= fluke_ljuv, "smalljuv",
                               ifelse(LENGTH < fluke_lm, "largejuv", "adult"))) %>% 
   group_by(haulid, spp, lengthclass) %>% 
-  summarise(numlengthclass = sum(numlen_correct))  
+  summarise(numlengthclass = sum(NUMLEN))  
 
 fluke_neus_len_zeros <- expand_grid(haulid=unique(dat_exploded_neus$haulid),  lengthclass=unique(fluke_neus_len_agg$lengthclass),
                                  spp="Paralichthys dentatus") %>%  
