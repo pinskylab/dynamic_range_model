@@ -1,0 +1,70 @@
+---
+title: "survey data import and harmonization for mid-Atlantic process models"
+author: "Alexa Fredston-Hermann"
+date: "5/7/2020"
+output: html_document
+---
+
+Updating the `process_survey_data.R` file just for fluke to no longer pre-process for stages but still clean up and tidy data... 
+
+```{r packages and functions, eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
+#library(PBSmapping)
+library(tidyverse)
+library(here)
+library(stringr)
+library(lubridate)
+#library(data.table)
+here <- here::here
+
+OApath <- "~/github/OceanAdapt_9815545/"
+sppOfInt <- c("Paralichthys dentatus")
+regOfInt <- c("Northeast US Fall")
+
+```
+
+
+# Get zero-inflated data from OceanAdapt, and other datasets
+```{r data, eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
+load(paste0(OApath,"data_clean/dat_exploded.RData"))
+
+```
+
+# Get length-frequency data from individual surveys
+
+## Northeast US
+
+```{r neus len, eval=TRUE, echo=FALSE, results=FALSE, message=FALSE}
+load(paste0(OApath,"data_raw/neus_Survdat.RData"))
+load(paste0(OApath, "data_raw/neus_SVSPP.RData"))
+
+dat_exploded_neus <- dat.exploded %>% 
+  filter(region %in% regOfInt)
+
+neus_len <- survdat %>% 
+  # create a haulid for joining with dat.exploded
+  mutate(haulid = paste(formatC(CRUISE6, width=6, flag=0), formatC(STATION, width=3, flag=0), formatC(STRATUM, width=4, flag=0), sep='-')) %>% 
+  select(haulid, SVSPP, LENGTH, NUMLEN) %>% 
+  filter(haulid %in% dat_exploded_neus$haulid) %>% # pare down to hauls of interest 
+  left_join(spp, by="SVSPP") %>% # get species names from species codes
+  mutate(spp = str_to_sentence(SCINAME)) %>% # change to format of sppOfInt
+  select(spp, haulid, LENGTH, NUMLEN) %>%
+  filter(!is.na(LENGTH))
+
+# creating a separate haul info dataframe 
+hauldat <- survdat %>% 
+  # create a haulid for joining
+  mutate(haulid = paste(formatC(CRUISE6, width=6, flag=0), formatC(STATION, width=3, flag=0), formatC(STRATUM, width=4, flag=0), sep='-')) %>% 
+  select(haulid, BOTTEMP, YEAR, EST_TOWDATE) %>% 
+  distinct() %>%
+  rename("btemp"=BOTTEMP,
+         "year"=YEAR,
+         "date"=EST_TOWDATE)
+
+fluke_neus_fall <- neus_len %>% 
+  filter(spp == sppOfInt) %>% 
+  left_join(hauldat) %>% 
+  rename("length"=LENGTH,
+         "number_at_length"=NUMLEN)
+  
+write_csv(fluke_neus_fall, here("processed-data","fluke_catch_at_length_fall.csv"))
+```
