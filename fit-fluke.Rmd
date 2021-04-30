@@ -1,6 +1,6 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output: html_document
 ---
 
 ```{r packages}
@@ -12,6 +12,8 @@ library(here)
 library(magrittr)
 library(rstan)
 library(Matrix)
+library(ggridges)
+library(rstanarm)
 ```
 
 ### Size selectivity
@@ -31,6 +33,11 @@ In the fall, age 0 fish are < 30 cm, age 1 fish are 30-40 cm, age 2 fish are 41-
 We used an L50 of 27cm as the stage 2/3 breakpoint, following SAW 66. I haven't revisited whether we should change the breakpoint for stages 1 and 2, currently 18cm (halfway between 27cm and the min length 9cm). We could develop season-specific breakpoints, but if by fall the age 1 fish include some that are reproductive anyway, I think it's fine to start classifying those as stage 3 in our model.
 
 **Size selectivity is already accounted for in generating the prepped fluke data file.**
+
+```{r}
+sel_at_stage <- c(0.01,0.1,1) # make this up for now, but assumed selectivity at stage
+```
+
  
 ### Mortality
  
@@ -62,6 +69,8 @@ ny <- length(years)
 years_train <- ny-10
 years_proj <- 10
 
+flukedat <- flukedat %>%
+  filter(latround < 43)
 #get other dimensions
 patches <- sort(unique(flukedat$latround))
 np = length(patches) 
@@ -72,7 +81,7 @@ sbtdat <- flukedat %>%
   group_by(latround, year) %>% 
   summarise(sbt=mean(btemp, na.rm=TRUE)) %>% 
   ungroup() %>% 
-  mutate(patch=as.integer(as.factor(latround)),
+  mutate(patch= as.integer(as.factor(latround)), 
          year=as.integer(as.factor(year))) %>% #change real values to indices
   select(-latround)
 
@@ -111,26 +120,141 @@ g = 1
 spill=0.1
 ```
 
+explore data 
+
+```{r explore-data}
+
+
+  flukepop %>% 
+  group_by(patch) %>% 
+  mutate(scount = count / max(count)) %>% 
+  ungroup() %>% 
+    # filter(year > 40, patch == 4) %>% 
+  ggplot(aes(stage,scount, fill = factor(patch))) + 
+  geom_col(position = "dodge") + 
+    facet_wrap(~year)
+
+
+flukepop %>% 
+  group_by(stage) %>% 
+  summarise(missing = mean(count == 0))
+
+flukepop %>% 
+  group_by(year,patch) %>% 
+  summarise(hmm = (count[stage ==3] == 0 & sum(count) > 0))
+  
+```
+# New Model Idea
+
+Use stage 3 to scale the population, fir to the absolute numbers in 3, and back out the recruits. 
+
+Two if statements, if there are any stage comps, and if there are any stage 3s
+
+Let's keep it simple and say that if no stage 3 individuals are observed, nothing is observed, to avoid a weird edge case where some fish are seen, but no stage 3 are seen. Will need to revist this as the data change
+
+So what's the observation model? Probably something like temperature plus a patch fixed effect
+
+```{r}
+a <- flukepop %>% 
+  group_by(year, patch) %>% 
+  summarise(seen = count[stage == 3] > 0,
+            numbers = sum(count))
+
+sbt_frame <- sbt %>% 
+  as.data.frame() %>% 
+  mutate(patch = 1:nrow(.)) %>% 
+  pivot_longer(-patch, names_to = "year", values_to = "sbt", names_prefix = "V") %>% 
+  mutate(year = as.integer(year))
+
+a <- a %>% 
+  left_join(sbt_frame, by = c("year","patch")) %>% 
+  group_by(patch) %>% 
+  mutate(centered_numbers = numbers - mean(numbers)) %>% 
+  group_by(patch) %>% 
+  arrange(patch,year) %>% 
+  mutate(delta_sbt = sbt - lag(sbt,2),
+         delta_numbers = numbers - lag(numbers,1))
+
+mean(a$seen)
+
+a %>% 
+  ggplot(aes(sbt, numbers)) + 
+  geom_point()
+
+a %>% 
+  ggplot(aes(sbt, centered_numbers)) + 
+  geom_point()
+
+a %>% 
+  ggplot(aes(delta_sbt, delta_numbers)) + 
+  geom_point() + 
+  scale_x_continuous(name = "Change in SBT") +
+  scale_y_continuous(name = "Change in Numbers")
+
+a %>% 
+  ggplot(aes(sbt, fill = factor(patch))) + 
+  geom_density(alpha = 0.25)
+
+seen_model <- stan_glm(seen ~ sbt, data = a, family = "binomial") # should have patch as well, but let's keep it simple for now, seems to work well enough
+# rstanarm::launch_shinystan(seen_model)
+summary(seen_model)
+plot(seen_model)
+
+rstanarm::posterior_vs_prior(seen_model)
+
+
+```
+
+
+At the moment modeling recruit as temperature driven deviations from mean recruitment. Looking at the patches, I don't think that makes much sense. Let's instead make temperature alter mean recruitment itself, and then allow deviation away from that. 
+
+So, lets say that
+
+$$\bar{r}_{p,y} = Re^{f(t_{p,y})} $$
+
+and then
+
+$$r_{p,y} \sim normal(log(\bar{r}_{p,y}),\sigma_r)$$
+
+So, let's say presence / absence of stage 3 individuals is
+
+$$seen_{p,y} \sim bernoulli(1 + sst_{p,y})$$
+
+If anything is seen...
+
+$$1 \sim bernoulli(1 + sst_{p,y})$$
+
+$$n_{s=3,p,y} \sim NB(\hat{n_{s=3,p,y}} \times sel_{s = 3},\phi) $$
+
+$$pn_{p,y} \sim multinomial(\hat{pn_{p,y} \times sel})$$
+
+else
+
+$$0 \sim bernoulli(1 + sst_{p,y})$$
+
+
 
 ```{r fit T_dep_rec}
 
 stage_data <- list(
+  sel_at_stage = sel_at_stage,
   sst = sbt[, 1:years_train], # this isn't SST anymore, it's SBT... need to rename in model
-  sst_proj = sbt[, (years_train+1):ny],
+  sst_proj = sbt[, (years_train):ny],
   spill = spill,
   np = np,
   ns = ns,
   ny = years_train,
   n_p_s_y = pop[,,1:years_train],
   proj_init = pop[,,years_train],
-  ny_proj = years_proj, 
+  mean_length_at_age = 1:ns,
+  ny_proj = years_proj + 1, 
   m = z,  # should rename model to Z at some point?
   g = g
 )
 
-warmups <- 1000
+warmups <- 2000
 
-total_iterations <- 2000
+total_iterations <- 4000
 
 max_treedepth <-  12
 
@@ -140,12 +264,71 @@ n_cores <- 4
 
 stage_model_fit <- stan(file = here::here("src","T_dep_rec_fluke.stan"), # check that it's the right model!
            data = stage_data,
-           chains = n_chains,
+           chains = 4,
            warmup = warmups,
            iter = total_iterations,
-           cores = n_cores,
+           cores = 4,
            refresh = 250,
            control = list(max_treedepth = max_treedepth,
                           adapt_delta = 0.95)
            )
+
 ```
+
+Process results
+```{r}
+
+n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, n_p_s_y_hat[patch, stage,year], n = 1000)
+
+n_p_s_y <- pop[,,1:years_train] %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
+
+sel <- tibble(stage = 1:ns, sel = sel_at_stage)
+
+gg_n_p_s_y_hat <- n_p_s_y_hat %>% 
+  left_join(sel, by = "stage") %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y, aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_grid(patch~stage, scales = "free_y") + 
+  scale_fill_brewer() +
+  labs(title="model predictions")
+
+gg_n_p_s_y_hat
+gg_n_p_s_y_hat_s3 <- n_p_s_y_hat %>% 
+  left_join(sel, by = "stage") %>% 
+  filter(stage == 3) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y %>% filter(stage == 3), aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_wrap(~patch) + 
+  scale_fill_brewer() +
+  labs(title="model predictions")
+
+gg_n_p_s_y_hat_s3
+```
+
+
+```{r}
+
+
+pp_proj_n_p_s_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_proj_n_p_s_y_hat[patch, stage,year], n = 1000)
+
+n_p_s_y_proj <- pop[,,(years_train):ny] %>% 
+  reshape::melt(varnames = c("patch","stage","year")) %>% 
+  as_tibble() 
+
+
+gg_pp_proj_n_p_s_y_hat <- pp_proj_n_p_s_y_hat %>% 
+  filter(stage == 3) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=stage),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_s_y_proj %>% filter(stage == 3), aes(x=year, y=value, group=stage), size = 2,alpha = 0.5) + 
+  facet_wrap(~patch, scales = "free_y") + 
+  scale_fill_brewer() +
+  labs(title="forecast")
+
+gg_pp_proj_n_p_s_y_hat
+```
+
