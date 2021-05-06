@@ -2,6 +2,12 @@
 title: "R Notebook"
 output: html_document
 ---
+# Packages
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
 
 ```{r packages}
 set.seed(42)
@@ -13,97 +19,124 @@ library(magrittr)
 library(rstan)
 library(Matrix)
 library(ggridges)
-library(rstanarm)
+# library(rstanarm)
 ```
+## Get summer flounder data
 
-### Size selectivity
-
-Email from Mark Terceiro at NOAA:
-
---
-The current assessment model provides estimates of NEFSC HB Bigelow survey selectivity at age for 2009-2019.
-For spring: age 0 = 0.00, age 1 = 0.75, age 2 = 0.80, age 3-7+ = 1.00 
-For fall:      age 0 = 0.72, age 1 = 0.80, age 2 = 1.00, age 3-7+ = 1.00
-
-As a rough estimation of how ages relate to lengths:
-In the spring no age 0 fish are caught, age 1 fish are generally < 36 cm, age 2 fish are 36 - 40 cm, and age 3 fish are > 40 cm.
-In the fall, age 0 fish are < 30 cm, age 1 fish are 30-40 cm, age 2 fish are 41-45 cm, and age 3 fish are > 45 cm.
---
-
-We used an L50 of 27cm as the stage 2/3 breakpoint, following SAW 66. I haven't revisited whether we should change the breakpoint for stages 1 and 2, currently 18cm (halfway between 27cm and the min length 9cm). We could develop season-specific breakpoints, but if by fall the age 1 fish include some that are reproductive anyway, I think it's fine to start classifying those as stage 3 in our model.
-
-**Size selectivity is already accounted for in generating the prepped fluke data file.**
-
-```{r}
-sel_at_stage <- c(0.01,0.1,1) # make this up for now, but assumed selectivity at stage
-```
-
- 
-### Mortality
- 
-Stock assessment SAW66 page 20:
-Fishing mortality rates and stock sizes were estimated using the ASAP statistical catch at age model. An age-specific instantaneous natural mortality rate providing an average M = 0.25 was assumed for all years. Fishing mortality on the fully selected age 4 fish ranged between 0.744 and 1.622 during 1982-1996 and then decreased to 0.245 in 2007. Since 2007 the fishing mortality rate has increased and was 0.334 in 2017. The 90% confidence interval for F in 2017 was 0.276 to 0.380. 
-
-### Growth
-
-Summer flounder seem to reach reproductive size within three years -- actually, much faster -- so I've made the growth rate 1, indicating that the probability that individuals in a size class transition to the next one in any time step is 100%.
+Note that we are now pulling in the raw length composition data, and it is for the fall survey only.
 
 ```{r data}
-flukedat <- read_csv(here("processed-data","fluke_prepped_data.csv")) %>% 
-  filter(year>=1968) %>% 
-  mutate(latround = floor(lat))
+rawdat <- read_csv(here("processed-data","fluke_catch_at_length_fall.csv"))
+```
 
-# keep only lat bands sampled every year
-latOK <- flukedat %>% 
-  select(latround, year) %>% 
+## Convert to ages 
+
+
+Page 58 of SAW 66: In the current work, the NEFSC trawl survey data for 1976-2016 (ages for 2017 were not yet available) were used to estimate growth parameters for males, females, and sexes combined for the full time series and for seven multi-year (generally five year) bins. The full time series data provide parameters for males (n = 19,424) of Linf = 63.9 cm, k = 0.18, with maximum length of 67 cm (age 6) and age of 15 (length 56-57 cm); parameters for females (n = 20,689) of Linf = 80.6 cm, k = 0.18, with maximum length of 82 cm (age 11) and age of 14 (length 76 cm); and **parameters for sexes combined (n = 40,942, including small fish of undetermined sex) of Linf = 83.6, k = 0.14, with maximum age of 15** (Table below, Figure A66).
+
+AF note: not sure how max age should be used
+
+```{r length-age}
+Loo = 83.6
+k = 0.14
+
+get_age_from_length <- function(length){
+  age = log(1-length/Loo)/-k # Dan, can you confirm I did this right? 
+  return(age)
+}
+
+rawdat$age <- get_age_from_length(rawdat$length)
+
+hist(rawdat$age)
+
+agedat <- rawdat %>% 
+  filter(year>=1972) %>% 
+  mutate(age_ceil = ceiling(age), # rounding up so we don't have age zero - should start at age 1
+         lat_floor = floor(lat)) %>% 
+  rowwise() %>% 
+  mutate(
+         age_ceil = min(age_ceil, 15)  # this is estimating a small number of super old fish, up to 24 -- I'm reclassifying them as 15 for now based on the stock assessment, is that right?
+         ) %>% 
+  group_by(year, age_ceil, lat_floor) %>% 
+  summarise(number_at_age = sum(number_at_length)) %>% 
+  ungroup()
+
+# visualize lat band sampling in fall 
+
+lat_pres <- agedat %>% 
+  select(lat_floor, year) %>% 
   distinct() %>% 
-    group_by(latround) %>% 
-  summarise(n=n()) %>% 
-  filter(n==max(n)) # NEED TO CHECK THAT THESE ARE CONTINUOUS AND MAKE SENSE
+  mutate(surveyed=TRUE)
 
-flukedat %<>% filter(latround %in% latOK$latround)
+expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # get all possible band*year combos
+  left_join(agedat %>% # get df with just surveyed bands
+  select(lat_floor, year) %>% 
+  distinct() %>% 
+  mutate(surveyed=TRUE)
+  ) %>% 
+  mutate(surveyed=replace_na(surveyed, FALSE)) %>%  #classify unsurveyed rows as false
+  ggplot(aes(x=year, y=lat_floor)) +
+  geom_tile(aes(fill=surveyed)) +
+  scale_y_continuous(breaks=seq(min(agedat$lat_floor), max(agedat$lat_floor, 1)))
+# based on this, let's drop lat bands below 35 and the year 2016
 
+agedat %<>% filter(lat_floor>34, year<2016)
+
+# check that this now means all bands are surveyed in all years 
+expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # get all possible band*year combos
+  left_join(agedat %>% # get df with just surveyed bands
+  select(lat_floor, year) %>% 
+  distinct() %>% 
+  mutate(surveyed=TRUE)
+  ) %>% 
+  mutate(surveyed=replace_na(surveyed, FALSE)) %>%  #classify unsurveyed rows as false
+  ggplot(aes(x=year, y=lat_floor)) +
+  geom_tile(aes(fill=surveyed)) +
+  scale_y_continuous(breaks=seq(min(agedat$lat_floor), max(agedat$lat_floor, 1)))
+```
+
+## Prep for model
+
+```{r modelprep}
 ## get time dimension
-years <- sort(unique(flukedat$year)) # should we cut out pre-1968?
+years <- sort(unique(agedat$year)) 
 ny <- length(years)
 years_train <- ny-10
 years_proj <- 10
 
-flukedat <- flukedat %>%
-  filter(latround < 43)
 #get other dimensions
-patches <- sort(unique(flukedat$latround))
+patches <- sort(unique(agedat$lat_floor))
 np = length(patches) 
-ns=3
+ages <- sort(unique(agedat$age_ceil))
+na <- length(ages) 
 
 # make temperature matrix
-sbtdat <- flukedat %>% 
-  group_by(latround, year) %>% 
+sbtdat <- rawdat %>% 
+  mutate(lat_floor = floor(lat)) %>% 
+  filter(lat_floor %in% unique(agedat$lat_floor),
+         year %in% unique(agedat$year)) %>% # only use lat bands in the trimmed age data
+  group_by(lat_floor, year) %>% 
   summarise(sbt=mean(btemp, na.rm=TRUE)) %>% 
   ungroup() %>% 
-  mutate(patch= as.integer(as.factor(latround)), 
+  mutate(patch= as.integer(as.factor(lat_floor)), 
          year=as.integer(as.factor(year))) %>% #change real values to indices
-  select(-latround)
+  select(-lat_floor)
 
-sbt <- as.matrix(with(sbtdat, sparseMatrix(patch, year, x=sbt))) 
+sbt <- as.matrix(with(sbtdat, sparseMatrix(patch, year, x=sbt))) # visually inspect this to be sure there are no zeroes -- they occur early in the time-series and also in 2016, but the data trimming should have taken care of it
 
 # make population matrix
-flukepop <- flukedat %>% 
-  group_by(year,latround, lengthclass) %>% 
-  summarise(count=sum(numlengthclass))%>% 
-  ungroup() %>% 
-  mutate(patch=as.integer(as.factor(latround)),
-         year=as.integer(as.factor(year)),
-         stage=recode(lengthclass, smalljuv=1, largejuv=2, adult=3),
-         count=floor(count)) %>% #change real values to indices and counts to integers (not sure if the latter is necessary)
-  select(-latround, -lengthclass)
 
-pop <- array(NA, dim = c(np, ns, ny)) 
+# add indices
+agedat$patch <- as.integer(as.factor(agedat$lat_floor))
+agedat$year <- as.integer(as.factor(agedat$year))
+
+# fill in matrix
+pop <- array(NA, dim = c(np, na, ny)) 
 for(p in 1:np){
-  for(s in 1:ns){
+  for(a in 1:na){
     for(y in 1:ny){
-      tmp <- flukepop %>% filter(patch==p, stage==s, year==y)
-      pop[p,s,y] <- tmp$count
+      tmp <- agedat %>% filter(patch==p, age_ceil==a, year==y)
+      pop[p,a,y] <- tmp$number_at_age
     }
   }
 }
@@ -113,12 +146,13 @@ m = 0.25
 f = 0.334
 z = exp(-m-f)
 
-# growth
-g = 1
-
 #spillover
 spill=0.1
 ```
+
+## fit a model
+
+# HERE BEGINS DAN'S OLD CODE
 
 explore data 
 
