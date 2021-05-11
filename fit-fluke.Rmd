@@ -20,6 +20,7 @@ library(rstan)
 library(Matrix)
 library(ggridges)
 # library(rstanarm)
+source(here("functions","generate-length-to-age.R")) # from SPASM by D Ovando
 ```
 ## Get summer flounder data
 
@@ -40,24 +41,31 @@ AF note: not sure how max age should be used
 Loo = 83.6
 k = 0.14
 
-get_age_from_length <- function(length){
-  age = log(1-length/Loo)/-k # Dan, can you confirm I did this right? 
+# Dan, can you confirm I did these right? 
+mean_age_from_length <- function(length){
+  age = log(1-length/Loo)/-k 
   return(age)
 }
 
-rawdat$age <- get_age_from_length(rawdat$length)
+# NOTE that I think this will produce zero length from zero age which we know is wrong. we need to add in a buffer for size at age 0
+mean_length_from_age <- function(age_vector){
+  length_vector = (1-exp(-k*age_vector))*Loo
+  return(length_vector)
+}
+
+rawdat$age <- mean_age_from_length(rawdat$length)
 
 hist(rawdat$age)
 
 agedat <- rawdat %>% 
   filter(year>=1972) %>% 
-  mutate(age_ceil = ceiling(age), # rounding up so we don't have age zero - should start at age 1
+  mutate(age_floor = floor(age), # rounding up so we don't have age zero - should start at age 1
          lat_floor = floor(lat)) %>% 
   rowwise() %>% 
   mutate(
-         age_ceil = min(age_ceil, 15)  # this is estimating a small number of super old fish, up to 24 -- I'm reclassifying them as 15 for now based on the stock assessment, is that right?
+         age_floor = min(age_floor, 15)  # this is estimating a small number of super old fish, up to 24 -- I'm reclassifying them as 15 for now based on the stock assessment, is that right?
          ) %>% 
-  group_by(year, age_ceil, lat_floor) %>% 
+  group_by(year, age_floor, lat_floor) %>% 
   summarise(number_at_age = sum(number_at_length)) %>% 
   ungroup()
 
@@ -107,8 +115,26 @@ years_proj <- 10
 #get other dimensions
 patches <- sort(unique(agedat$lat_floor))
 np = length(patches) 
-ages <- sort(unique(agedat$age_ceil))
-na <- length(ages) 
+ages <- sort(unique(agedat$age_floor))
+n_ages <- length(ages) 
+lbins <- sort(unique(rawdat$length))
+n_lbins <- length(lbins) 
+
+# make length-at-age key 
+length_at_age_key_dat <- generate_length_at_age_key(
+  min_age = min(ages), 
+  max_age = max(ages), 
+  cv = 0.2, # "magic number" - revisit this sometime (use LIME as a guide?)
+  k = k, 
+  linf = Loo,
+  t0 = 0, # is this right?
+  time_step = 1,
+  linf_buffer = 1 # doing this just to shoehorn it into the right size for the model; can make it bigger if we need to
+  )
+mean_length_at_age <- map(ages,mean_length_from_age) %>% unlist()
+
+# convert to matrix 
+length_at_age_key <- as.matrix(with(length_at_age_key_dat, sparseMatrix(age, length_bin, x=p_bin, index1 = FALSE))) # index1 deals with the fact that indices start at 0 not 1
 
 # make temperature matrix
 sbtdat <- rawdat %>% 
@@ -131,11 +157,11 @@ agedat$patch <- as.integer(as.factor(agedat$lat_floor))
 agedat$year <- as.integer(as.factor(agedat$year))
 
 # fill in matrix
-pop <- array(NA, dim = c(np, na, ny)) 
+pop <- array(NA, dim = c(np, n_ages, ny)) 
 for(p in 1:np){
-  for(a in 1:na){
+  for(a in 1:n_ages){
     for(y in 1:ny){
-      tmp <- agedat %>% filter(patch==p, age_ceil==a, year==y)
+      tmp <- agedat %>% filter(patch==p, age_floor==(a-1), year==y) # here's where we convert ages to be indexed starting at 1 not 0 for ease in Stan
       pop[p,a,y] <- tmp$number_at_age
     }
   }
@@ -147,10 +173,122 @@ f = 0.334
 z = exp(-m-f)
 
 #spillover
-spill=0.1
+# spill=0.1
 ```
 
 ## fit a model
+
+```{r fit-model, echo=FALSE, message=FALSE}
+stage_data <- list(
+  np=np,
+  n_ages=n_ages,
+  ny=ny,
+  n_p_a_y = pop, 
+  proj_init = pop[,,1],
+  ny_proj = years_proj,
+  sst = sbt, # change these variable names sometime...
+  sst_proj = sbt[, (years_train+1):ny],
+  z=z,
+  k=k,
+  loo=Loo,
+  length_50_sel_guess=20, # THIS IS A RANDOM GUESS, I can't find help in the stock assessment
+  n_lbins = n_lbins, 
+  mean_length_at_age = mean_length_at_age, 
+  length_at_age_key = length_at_age_key[, 11:84], # DANGER! I'm ignoring the first 10 rows here to make it the same dimensions as n_lbins, just to get it to run, but recognizing that we need to deal with very small fish in the model 
+  age_sel = 0,
+  bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
+  sel_100 = 3 # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
+)
+
+warmups <- 2000
+
+total_iterations <- 4000
+
+max_treedepth <-  12
+
+n_chains <-  4
+
+n_cores <- 4 
+
+stage_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), # check that it's the right model!
+           data = stage_data,
+           chains = 4,
+           warmup = warmups,
+           iter = total_iterations,
+           cores = 4,
+           refresh = 250,
+           control = list(max_treedepth = max_treedepth,
+                          adapt_delta = 0.95)
+           )
+
+```
+
+## evaluate the model
+
+```{r}
+# get estimate of true states / posterior predictive / forecast
+n_p_a_y_hat <-  tidybayes::gather_draws(stage_model_fit, n_p_a_y_hat[patch, age,year], n = 1000)
+
+# pp_n_p_a_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_n_p_a_y_hat[patch, age,year], n = 1000) # add this back into the model!
+
+pp_proj_n_p_a_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_proj_n_p_a_y_hat[patch, age,year], n = 1000)
+
+
+# get real data
+n_p_a_y <- pop[,,1:years_train] %>% 
+  reshape::melt(varnames = c("patch","age","year")) %>% 
+  as_tibble() 
+n_p_a_y_proj <- pop[,,(years_train+1):ny] %>% 
+  reshape::melt(varnames = c("patch","age","year")) %>% 
+  as_tibble() 
+
+# get estimated selectivity at age
+sel_at_age <- gather_draws(stage_model_fit, mean_selectivity_at_age[age], n=1000)
+
+# calculate means, for transforming the model estimate into the same "units" as our raw data (selected by survey)
+sel <- sel_at_age %>% 
+  group_by(age) %>% 
+  summarise(sel = mean(.value))
+
+gg_n_p_a_y_hat <- n_p_a_y_hat %>% 
+  left_join(sel, by = "age") %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 
+  scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
+  facet_grid(patch~age) + 
+  scale_fill_brewer() +
+  labs(title="model predictions")
+
+
+# posterior predictive fits
+# gg_pp_n_p_a_y_hat <- pp_n_p_a_y_hat %>% 
+#   ggplot() +
+#   stat_lineribbon(aes(x = year, y = .value, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+#   geom_point(data = n_p_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 
+#     scale_y_continuous(limits=c(0,500)) + # changed from free scales to constrain y-axis
+# facet_grid(patch~age) + 
+#   scale_fill_brewer()+
+#   labs(title="posterior predictive fit")
+
+# forecast fits
+gg_pp_proj_n_p_a_y_hat <- pp_proj_n_p_a_y_hat %>%
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y_proj, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) +
+    scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
+facet_grid(patch~age) +
+  scale_fill_brewer() +
+  labs(title="forecast")
+
+gg_n_p_a_y_hat
+#gg_pp_n_p_a_y_hat
+gg_pp_proj_n_p_a_y_hat
+
+ggsave(gg_n_p_a_y_hat, filename=here("results","fluke_age_structure_model_predictions.png"), scale=1.5, width=10, height=5)
+ggsave(gg_pp_proj_n_p_a_y_hat, filename=here("results","fluke_age_structure_forecast.png"), scale=1.5, width=10, height=5)
+
+```
 
 # HERE BEGINS DAN'S OLD CODE
 

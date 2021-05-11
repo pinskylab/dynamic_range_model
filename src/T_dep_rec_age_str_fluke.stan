@@ -8,7 +8,7 @@ functions {
 
 data {
   
-  real spill; //spillover rate between adjacent patches
+  //  real spill; //spillover rate between adjacent patches
   
   int np; // number of patches
   
@@ -30,26 +30,32 @@ data {
   
   real z;  // total mortality 
   
-  //   vector<lower = 0>[na] sel_at_age; // vector of selectivity at age
+  real k;
+  
+  real loo;
+  
+  real length_50_sel_guess;
   
   // PASTING IN FROM SCROOGE:
   
-int n_lbins; // number of length bins (here just the range of cm values)
-
-vector<lower=0>[n_ages] mean_length_at_age;
-
-//vector<lower=0>[n_ages] mean_weight_at_age;
-
-//vector<lower=0, upper=1>[n_ages] mean_maturity_at_age;
-
-matrix[n_ages, n_lbins] length_at_age_key;
-
-//int age_sel; // estimate of the age at first selectivity
-
-real h; //steepness
-
+  int n_lbins; // number of length bins (here just the range of cm values)
+  
+  vector<lower=0>[n_ages] mean_length_at_age;
+  
+  //vector<lower=0>[n_ages] mean_weight_at_age;
+  
+  //vector<lower=0, upper=1>[n_ages] mean_maturity_at_age;
+  
+  matrix[n_ages, n_lbins] length_at_age_key;
+  
+  vector<lower=0>[n_lbins] bin_mids;
+  
+  //int age_sel; // estimate of the age at first selectivity
+  
+  //real h; //steepness
+  
   int sel_100; // age at which selectivity is 1 
-
+  
   
 }
 
@@ -83,6 +89,9 @@ parameters{
   
   real sel_50;
   
+  real<lower = 0> p_length_50_sel; // length at 50% selectivity
+  
+  
 }
 
 transformed parameters{
@@ -91,7 +100,9 @@ transformed parameters{
   
   real<lower=0> sigma_r;
   
-  real<lower = 0> p_length_50_sel; // length at 50% selectivity
+  real length_50_sel;
+  
+  real sel_delta;
   
   real mean_recruits;
   
@@ -99,16 +110,20 @@ transformed parameters{
   
   vector[ny-1] rec_dev; // array of realized recruitment deviates, also now only 1/yr
   
-  vector[n_ages] sel_at_age; // vector of selectivity at stage
+  // vector[n_ages] sel_at_age; // vector of selectivity at stage
   
-    vector[n_ages] mean_selectivity_at_age; // mean selectivity at age
-
+  vector[n_ages] mean_selectivity_at_age; // mean selectivity at age
   
-  sel_at_age = 1.0 ./ (1 + exp(-log(19) * ((mean_length_at_age - sel_50) / 1e-1))); // selectivity ogive at age
-  //NOT SURE THIS FORMULA IS RIGHT ANYMORE
+  vector[n_lbins] selectivity_at_bin; // mean selectivity at length bin midpoint
   
-    mean_selectivity_at_age = length_at_age_key * sel_at_age; // calculate mean selectivity at age given variance in length at age
-  // CHANGED THIS FROM *SELECTIVITY_AT_BIN, and got rid of the other length bin code, because our lengths are near-continuous... is that fine?
+  sel_delta = 2;
+  
+  length_50_sel = loo * p_length_50_sel;
+  
+  
+  selectivity_at_bin = 1.0 ./ (1 + exp(-log(19) * ((bin_mids - length_50_sel) / sel_delta))); // selectivity ogive at age
+  
+  mean_selectivity_at_age = length_at_age_key * selectivity_at_bin; // calculate mean selectivity at age given variance in length at age
   
   sigma_r = exp(log_sigma_r);
   
@@ -151,21 +166,21 @@ transformed parameters{
     // ALSO NEED TO UNDERSTAND THE SIZE SELECTIVITY FORMULA
     // HOW TO INCORPORATE MAX AGE? 
     
-      for(a in 2:n_ages){
-        
-        for(p in 1:np){
+    for(a in 2:n_ages){
+      
+      for(p in 1:np){
         
         // note there is no growth rate because 100% of individuals transition (unless they die)
         // is z supposed to be logged here? 
         // still need to add dispersal back in
         n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * (1-z);
+        
+      } // close patches
       
-    } // close patches
+    } // close ages for 2+
     
-      } // close ages for 2+
-      
   } // close year 2+ loop
-    
+  
   
 } // close transformed parameters block
 
@@ -195,6 +210,8 @@ model {
   
   sel_50 ~ normal(1.3,.1);
   
+  p_length_50_sel ~ normal(length_50_sel_guess/loo, .05);
+  
   for(y in 2:ny) {
     
     raw[y-1] ~ normal(0,sigma_r); // prior on raw process error
@@ -203,34 +220,34 @@ model {
       
       theta = exp((seen_intercept + seen_sst * sst[p,y])) / (1 +  exp((seen_intercept + seen_sst * sst[p,y]))); // calculate detection probability
       
-     // if (n_p_s_y[p,n_ages,y] > 0) { // if any stage three are observed
-     
-     if(sum(n_p_a_y[p,sel_100:n_ages,y]) > 0) {
+      // if (n_p_s_y[p,n_ages,y] > 0) { // if any stage three are observed
       
-      // print("hmm",min(n_p_a_y[p,1:ns,y]));
-      // // 
-      // print("hmm 2 ", sum(to_vector(n_p_a_y_hat[p,1:ns,y])));
-      // 
-      
-      // if (min(n_p_a_y[p,1:ns,y]) > 0) {
-        // n_p_a_y[p,1:ns,y] ~ multinomial((to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage + 1) / sum(to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage + 1));
+      if(sum(n_p_a_y[p,sel_100:n_ages,y]) > 0) {
         
-        // }
+        // print("hmm",min(n_p_a_y[p,1:ns,y]));
+        // // 
+        // print("hmm 2 ", sum(to_vector(n_p_a_y_hat[p,1:ns,y])));
+        // 
         
-        // n_p_a_y[p,1:ns,y] ~ multinomial(to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage);
-        
-        
-        // print("hat stages are ", (to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage) / sum(to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage));
-        
-        
-        // print("observed stages are ",n_p_a_y[p,1:ns,y]);
-        
-        n_p_a_y[p,n_ages,y] ~ neg_binomial_2(n_p_a_y_hat[p,n_ages,y] * sel_at_age[n_ages] + 1e-3, phi_obs); // fit population scale to number of stage three observed
-        
-        // print("stage 3 seen is ",n_p_a_y_hat[p,ns,y] * sel_at_stage[ns]);
-        
-        1 ~ bernoulli(theta);
-        
+        // if (min(n_p_a_y[p,1:ns,y]) > 0) {
+          // n_p_a_y[p,1:ns,y] ~ multinomial((to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage + 1) / sum(to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage + 1));
+          
+          // }
+          
+          // n_p_a_y[p,1:ns,y] ~ multinomial(to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage);
+          
+          
+          // print("hat stages are ", (to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage) / sum(to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage));
+          
+          
+          // print("observed stages are ",n_p_a_y[p,1:ns,y]);
+          
+          n_p_a_y[p,n_ages,y] ~ neg_binomial_2(n_p_a_y_hat[p,n_ages,y] * mean_selectivity_at_age[n_ages] + 1e-3, phi_obs); // fit population scale to number of stage three observed
+          
+          // print("stage 3 seen is ",n_p_a_y_hat[p,ns,y] * sel_at_stage[ns]);
+          
+          1 ~ bernoulli(theta);
+          
       } else { // only evaluate length comps if there are length comps to evaluate
       
       0 ~ bernoulli(theta);
@@ -304,18 +321,21 @@ generated quantities{
           
           // project stage 1 (recruitment)
           tmp_proj[p, 1, y] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2) * T_adjust_proj[p, y]; // added in T-dependence here 
+          //        print("proj recruits in patch: ",p," year: ",y," is ",tmp_proj[p,1,y]);
           
-        
-        // age 1+ dispersal
-        
-        for(a in 2:n_ages){
           
-          tmp_proj[p, a, y] = tmp_proj[p, a-1, y-1] * (1-z);
+          // age 1+ dispersal
           
-        } // close age loop
+          for(a in 2:n_ages){
+            
+            tmp_proj[p, a, y] = tmp_proj[p, a-1, y-1] * (1-z);
+            
+            //  print("tmp_proj at age: ",a," patch: ",p," year: ",y," is ",tmp_proj[p,a,y]);
+            
+          } // close age loop
           
         } // close patch loop
-
+        
         // simulate selectivity and sampling error, at the moment only for stage 3 for weird reasons
         // AF: I just pooled these so that both are added for every age but I'm sure it's wrong somehow 
         
@@ -327,7 +347,7 @@ generated quantities{
           
           for (a in 1:n_ages){
             
-            pp_proj_n_p_a_y_hat[p, a, y] = seen * neg_binomial_2_rng(tmp_proj[p,a,y], phi_obs) * sel_at_age[a];
+            pp_proj_n_p_a_y_hat[p, a, y] = seen * neg_binomial_2_rng(tmp_proj[p,a,y] + 1e-3, phi_obs) * mean_selectivity_at_age[a]; // is it OK to have added the 0.001 buffer here?
             
           }
           
