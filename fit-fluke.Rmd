@@ -287,11 +287,12 @@ filter(age==2) %>%
 
 # forecast fits
 gg_pp_proj_n_p_a_y_hat <- pp_proj_n_p_a_y_hat %>%
+  left_join(sel, by = "age") %>% 
   ggplot() +
-  stat_lineribbon(aes(x = year, y = .value, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
   geom_point(data = n_p_a_y_proj, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) +
   scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
-  facet_grid(patch~age) +
+  facet_grid(age~patch, scales="free_y") + 
   scale_fill_brewer() +
   labs(title="forecast")
 
@@ -300,7 +301,7 @@ gg_n_p_a_y_hat
 gg_pp_proj_n_p_a_y_hat
 
 ggsave(gg_n_p_a_y_hat, filename=here("results","fluke_age_structure_model_predictions.png"), scale=1.5, width=6, height=10)
-ggsave(gg_pp_proj_n_p_a_y_hat, filename=here("results","fluke_age_structure_forecast.png"), scale=1.5, width=10, height=5)
+ggsave(gg_pp_proj_n_p_a_y_hat, filename=here("results","fluke_age_structure_forecast.png"), scale=1.5, width=6, height=10)
 
 ```
 
