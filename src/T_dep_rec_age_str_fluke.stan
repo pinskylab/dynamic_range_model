@@ -14,15 +14,15 @@ data {
   
   int n_ages; // number of ages
   
-  int ny; // number of years
-  
-  int n_p_a_y[np,n_ages,ny]; // array of numbers at patch, stage, and year 
-  
-  int proj_init[np,n_ages]; // array of initial states for the future projections
+  int ny_train; // years for training
   
   int ny_proj; // number of years to forecast 
   
-  real sst[np, ny]; // temperature data for training
+  int n_p_a_y[np,n_ages,ny_train]; // array of numbers at patch, stage, and year 
+  
+  int proj_init[np,n_ages]; // array of initial states for the future projections
+  
+  real sst[np, ny_train]; // temperature data for training
   
   real sst_proj[np, ny_proj]; // temperature data for testing 
   
@@ -78,7 +78,7 @@ parameters{
   
   real log_mean_recruits;
   
-  vector[ny-1] raw; // array of raw recruitment deviates, changed to one value per year
+  vector[ny_train-1] raw; // array of raw recruitment deviates, changed to one value per year
   
   //  real<lower = 1e-3> sigma_obs;
   real<lower=0> phi_obs; // I thought it was possible for this parameter to be negtive, but at one point got this error: Exception: neg_binomial_2_lpmf: Precision parameter is -0.317205, but must be > 0!  (in 'model1ee6785925e9_stage_ar_model_adult_dispersal' at line 145)
@@ -96,7 +96,7 @@ parameters{
 
 transformed parameters{
   
-  real T_adjust[np, ny]; 
+  real T_adjust[np, ny_train]; 
   
   real<lower=0> sigma_r;
   
@@ -106,9 +106,9 @@ transformed parameters{
   
   real mean_recruits;
   
-  real n_p_a_y_hat [np,n_ages,ny]; // array of numbers at patch, stage, and year 
+  real n_p_a_y_hat [np,n_ages,ny_train]; // array of numbers at patch, stage, and year 
   
-  vector[ny-1] rec_dev; // array of realized recruitment deviates, also now only 1/yr
+  vector[ny_train-1] rec_dev; // array of realized recruitment deviates, also now only 1/yr
   
   // vector[n_ages] sel_at_age; // vector of selectivity at stage
   
@@ -132,12 +132,12 @@ transformed parameters{
   n_p_a_y_hat[1:np,1:n_ages,1] = n_p_a_y[1:np,1:n_ages,1]; // initialize population with "known" values
   
   for(p in 1:np){
-    for(y in 1:ny){
+    for(y in 1:ny_train){
       T_adjust[p,y] = T_dep(sst[p,y], Topt, width); // calculate temperature-dependence correction factor for each patch and year depending on SST 
     } // close years
   } // close patches
   
-  for (y in 2:ny){
+  for (y in 2:ny_train){
     
     if (y == 2){ 
       rec_dev[y-1]  =  raw[1]; // initialize first year of rec_dev with raw (process error) -- now not patch-specific
@@ -212,7 +212,7 @@ model {
   
   p_length_50_sel ~ normal(length_50_sel_guess/loo, .05);
   
-  for(y in 2:ny) {
+  for(y in 2:ny_train) {
     
     raw[y-1] ~ normal(0,sigma_r); // prior on raw process error
     

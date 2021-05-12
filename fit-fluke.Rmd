@@ -19,7 +19,7 @@ library(magrittr)
 library(rstan)
 library(Matrix)
 library(ggridges)
-# library(rstanarm)
+library(rstanarm)
 source(here("functions","generate-length-to-age.R")) # from SPASM by D Ovando
 ```
 ## Get summer flounder data
@@ -63,8 +63,8 @@ agedat <- rawdat %>%
          lat_floor = floor(lat)) %>% 
   rowwise() %>% 
   mutate(
-         age_floor = min(age_floor, 15)  # this is estimating a small number of super old fish, up to 24 -- I'm reclassifying them as 15 for now based on the stock assessment, is that right?
-         ) %>% 
+    age_floor = min(age_floor, 15)  # this is estimating a small number of super old fish, up to 24 -- I'm reclassifying them as 15 for now based on the stock assessment, is that right?
+  ) %>% 
   group_by(year, age_floor, lat_floor) %>% 
   summarise(number_at_age = sum(number_at_length)) %>% 
   ungroup()
@@ -78,9 +78,9 @@ lat_pres <- agedat %>%
 
 expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # get all possible band*year combos
   left_join(agedat %>% # get df with just surveyed bands
-  select(lat_floor, year) %>% 
-  distinct() %>% 
-  mutate(surveyed=TRUE)
+              select(lat_floor, year) %>% 
+              distinct() %>% 
+              mutate(surveyed=TRUE)
   ) %>% 
   mutate(surveyed=replace_na(surveyed, FALSE)) %>%  #classify unsurveyed rows as false
   ggplot(aes(x=year, y=lat_floor)) +
@@ -93,9 +93,9 @@ agedat %<>% filter(lat_floor>34, year<2016)
 # check that this now means all bands are surveyed in all years 
 expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # get all possible band*year combos
   left_join(agedat %>% # get df with just surveyed bands
-  select(lat_floor, year) %>% 
-  distinct() %>% 
-  mutate(surveyed=TRUE)
+              select(lat_floor, year) %>% 
+              distinct() %>% 
+              mutate(surveyed=TRUE)
   ) %>% 
   mutate(surveyed=replace_na(surveyed, FALSE)) %>%  #classify unsurveyed rows as false
   ggplot(aes(x=year, y=lat_floor)) +
@@ -130,7 +130,7 @@ length_at_age_key_dat <- generate_length_at_age_key(
   t0 = 0, # is this right?
   time_step = 1,
   linf_buffer = 1 # doing this just to shoehorn it into the right size for the model; can make it bigger if we need to
-  )
+)
 mean_length_at_age <- map(ages,mean_length_from_age) %>% unlist()
 
 # convert to matrix 
@@ -179,14 +179,14 @@ z = exp(-m-f)
 ## fit a model
 
 ```{r fit-model, echo=FALSE, message=FALSE}
-stage_data <- list(
+age_data <- list(
   np=np,
   n_ages=n_ages,
-  ny=ny,
-  n_p_a_y = pop, 
+  ny_train=years_train,
+  n_p_a_y = pop[,,1:years_train], 
   proj_init = pop[,,1],
   ny_proj = years_proj,
-  sst = sbt, # change these variable names sometime...
+  sst = sbt[, 1:years_train], # change these variable names sometime...
   sst_proj = sbt[, (years_train+1):ny],
   z=z,
   k=k,
@@ -210,28 +210,32 @@ n_chains <-  4
 
 n_cores <- 4 
 
-stage_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), # check that it's the right model!
-           data = stage_data,
-           chains = 4,
-           warmup = warmups,
-           iter = total_iterations,
-           cores = 4,
-           refresh = 250,
-           control = list(max_treedepth = max_treedepth,
-                          adapt_delta = 0.95)
-           )
+age_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), # check that it's the right model!
+                      data = age_data,
+                      chains = 4,
+                      warmup = warmups,
+                      iter = total_iterations,
+                      cores = 4,
+                      refresh = 250,
+                      control = list(max_treedepth = max_treedepth,
+                                     adapt_delta = 0.95)
+)
 
 ```
 
 ## evaluate the model
 
 ```{r}
+launch_shinystan(age_model_fit)
+check_divergences(age_model_fit)
+plot(age_model_fit)
+
 # get estimate of true states / posterior predictive / forecast
-n_p_a_y_hat <-  tidybayes::gather_draws(stage_model_fit, n_p_a_y_hat[patch, age,year], n = 1000)
+n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, n_p_a_y_hat[patch, age,year], n = 1000)
 
-# pp_n_p_a_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_n_p_a_y_hat[patch, age,year], n = 1000) # add this back into the model!
+# pp_n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, pp_n_p_a_y_hat[patch, age,year], n = 1000) # add this back into the model!
 
-pp_proj_n_p_a_y_hat <-  tidybayes::gather_draws(stage_model_fit, pp_proj_n_p_a_y_hat[patch, age,year], n = 1000)
+pp_proj_n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, pp_proj_n_p_a_y_hat[patch, age,year], n = 1000)
 
 
 # get real data
@@ -243,7 +247,7 @@ n_p_a_y_proj <- pop[,,(years_train+1):ny] %>%
   as_tibble() 
 
 # get estimated selectivity at age
-sel_at_age <- gather_draws(stage_model_fit, mean_selectivity_at_age[age], n=1000)
+sel_at_age <- gather_draws(age_model_fit, mean_selectivity_at_age[age], n=1000)
 
 # calculate means, for transforming the model estimate into the same "units" as our raw data (selected by survey)
 sel <- sel_at_age %>% 
@@ -255,10 +259,20 @@ gg_n_p_a_y_hat <- n_p_a_y_hat %>%
   ggplot() +
   stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
   geom_point(data = n_p_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 
-  scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
-  facet_grid(patch~age) + 
+  facet_grid(age~patch, scales="free_y") + 
   scale_fill_brewer() +
   labs(title="model predictions")
+
+
+gg_n_p_a_y_hat_age_2 <- n_p_a_y_hat %>% 
+    left_join(sel, by = "age") %>% 
+filter(age==2) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y %>% filter(age==2), aes(x=year, y=value), size = 2,alpha = 0.5) + 
+  facet_wrap(~patch, scales="free_y") + 
+  scale_fill_brewer() +
+  labs(title="age 2")
 
 
 # posterior predictive fits
@@ -276,8 +290,8 @@ gg_pp_proj_n_p_a_y_hat <- pp_proj_n_p_a_y_hat %>%
   ggplot() +
   stat_lineribbon(aes(x = year, y = .value, group=age),.width = c(.99, .95, .8, .5), color = "red") +
   geom_point(data = n_p_a_y_proj, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) +
-    scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
-facet_grid(patch~age) +
+  scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
+  facet_grid(patch~age) +
   scale_fill_brewer() +
   labs(title="forecast")
 
@@ -285,7 +299,7 @@ gg_n_p_a_y_hat
 #gg_pp_n_p_a_y_hat
 gg_pp_proj_n_p_a_y_hat
 
-ggsave(gg_n_p_a_y_hat, filename=here("results","fluke_age_structure_model_predictions.png"), scale=1.5, width=10, height=5)
+ggsave(gg_n_p_a_y_hat, filename=here("results","fluke_age_structure_model_predictions.png"), scale=1.5, width=6, height=10)
 ggsave(gg_pp_proj_n_p_a_y_hat, filename=here("results","fluke_age_structure_forecast.png"), scale=1.5, width=10, height=5)
 
 ```
@@ -297,14 +311,14 @@ explore data
 ```{r explore-data}
 
 
-  flukepop %>% 
+flukepop %>% 
   group_by(patch) %>% 
   mutate(scount = count / max(count)) %>% 
   ungroup() %>% 
-    # filter(year > 40, patch == 4) %>% 
+  # filter(year > 40, patch == 4) %>% 
   ggplot(aes(stage,scount, fill = factor(patch))) + 
   geom_col(position = "dodge") + 
-    facet_wrap(~year)
+  facet_wrap(~year)
 
 
 flukepop %>% 
@@ -314,7 +328,7 @@ flukepop %>%
 flukepop %>% 
   group_by(year,patch) %>% 
   summarise(hmm = (count[stage ==3] == 0 & sum(count) > 0))
-  
+
 ```
 # New Model Idea
 
@@ -435,15 +449,15 @@ n_chains <-  4
 n_cores <- 4 
 
 stage_model_fit <- stan(file = here::here("src","T_dep_rec_fluke.stan"), # check that it's the right model!
-           data = stage_data,
-           chains = 4,
-           warmup = warmups,
-           iter = total_iterations,
-           cores = 4,
-           refresh = 250,
-           control = list(max_treedepth = max_treedepth,
-                          adapt_delta = 0.95)
-           )
+                        data = stage_data,
+                        chains = 4,
+                        warmup = warmups,
+                        iter = total_iterations,
+                        cores = 4,
+                        refresh = 250,
+                        control = list(max_treedepth = max_treedepth,
+                                       adapt_delta = 0.95)
+)
 
 ```
 
