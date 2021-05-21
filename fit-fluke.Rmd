@@ -103,6 +103,7 @@ expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # 
   scale_y_continuous(breaks=seq(min(agedat$lat_floor), max(agedat$lat_floor, 1)))
 ```
 
+
 ## Prep for model
 
 ```{r modelprep}
@@ -199,17 +200,11 @@ age_data <- list(
   bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
   sel_100 = 3 # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
 )
-
 warmups <- 2000
-
 total_iterations <- 4000
-
 max_treedepth <-  12
-
 n_chains <-  4
-
 n_cores <- 4 
-
 age_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), # check that it's the right model!
                       data = age_data,
                       chains = 4,
@@ -220,8 +215,8 @@ age_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), #
                       control = list(max_treedepth = max_treedepth,
                                      adapt_delta = 0.95)
 )
-
 ```
+
 
 ## evaluate the model
 
@@ -264,6 +259,17 @@ gg_n_p_a_y_hat <- n_p_a_y_hat %>%
   labs(title="model predictions")
 
 
+gg_n_p_a_y_hat_ex <- n_p_a_y_hat %>% 
+  left_join(sel, by = "age") %>% 
+  filter(patch==6) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 
+  facet_wrap(~age, scales="free_y", ncol=8) + 
+  scale_fill_brewer() +
+  labs(title="model predictions", x="year", y="count")
+ggsave(gg_n_p_a_y_hat_ex, filename=here("results","fluke_pred_patch_6.png"), width=10, height=4, dpi=300)
+
 gg_n_p_a_y_hat_age_2 <- n_p_a_y_hat %>% 
     left_join(sel, by = "age") %>% 
 filter(age==2) %>% 
@@ -296,6 +302,18 @@ gg_pp_proj_n_p_a_y_hat <- pp_proj_n_p_a_y_hat %>%
   scale_fill_brewer() +
   labs(title="forecast")
 
+gg_pp_proj_n_p_a_y_hat_ex <- pp_proj_n_p_a_y_hat %>%
+  left_join(sel, by = "age") %>% 
+  filter(patch==6) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y_proj, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) +
+  scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
+  facet_wrap(~age, ncol=8, scales="free_y") + 
+  scale_fill_brewer() +
+  labs(title="forecast", x="year", y="count")
+ggsave(gg_pp_proj_n_p_a_y_hat_ex, filename=here("results","fluke_forecast_patch_6.png"), width=10, height=4, dpi=300)
+
 gg_n_p_a_y_hat
 #gg_pp_n_p_a_y_hat
 gg_pp_proj_n_p_a_y_hat
@@ -305,6 +323,123 @@ ggsave(gg_pp_proj_n_p_a_y_hat, filename=here("results","fluke_age_structure_fore
 
 ```
 
+
+## Fit one-patch model
+
+```{r fit-one-patch-model, echo=FALSE, message=FALSE}
+
+pop2 <- array(NA, dim = c(n_ages, ny)) 
+  for(a in 1:n_ages){
+    for(y in 1:ny){
+      tmp <- agedat %>% filter(age_floor==(a-1), year==y) %>% 
+        summarise(sum_number_at_age = sum(number_at_age))
+      pop2[a,y] <- tmp$sum_number_at_age
+    }
+}
+
+one_patch_data <- list(
+  np=np,
+  n_ages=n_ages,
+  ny_train=years_train,
+  n_a_y = pop2[,1:years_train], 
+  proj_init = pop2[,1],
+  ny_proj = years_proj,
+  sst = sbtdat %>% group_by(year) %>% summarise(meansbt = mean(sbt)) %>% filter(year <= years_train) %>% pull(meansbt),
+  sst_proj = sbtdat %>% group_by(year) %>% summarise(meansbt = mean(sbt)) %>% filter(year > years_train) %>% pull(meansbt),
+  z=z,
+  k=k,
+  loo=Loo,
+  length_50_sel_guess=20, # THIS IS A RANDOM GUESS, I can't find help in the stock assessment
+  n_lbins = n_lbins, 
+  mean_length_at_age = mean_length_at_age, 
+  length_at_age_key = length_at_age_key[, 11:84], # DANGER! I'm ignoring the first 10 rows here to make it the same dimensions as n_lbins, just to get it to run, but recognizing that we need to deal with very small fish in the model 
+  age_sel = 0,
+  bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
+  sel_100 = 3 # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
+)
+
+warmups <- 2000
+
+total_iterations <- 4000
+
+max_treedepth <-  12
+
+n_chains <-  4
+
+n_cores <- 4 
+
+one_patch_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke_one_patch.stan"), # check that it's the right model!
+                      data = one_patch_data,
+                      chains = 4,
+                      warmup = warmups,
+                      iter = total_iterations,
+                      cores = 4,
+                      refresh = 250,
+                      control = list(max_treedepth = max_treedepth,
+                                     adapt_delta = 0.95)
+)
+
+```
+## Evaluate one-patch model
+```{r}
+launch_shinystan(one_patch_model_fit)
+check_divergences(one_patch_model_fit)
+plot(one_patch_model_fit)
+
+# get estimate of true states / posterior predictive / forecast
+n_a_y_hat <-  tidybayes::gather_draws(one_patch_model_fit
+, n_a_y_hat[age,year], n = 1000)
+
+# pp_n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, pp_n_p_a_y_hat[patch, age,year], n = 1000) # add this back into the model!
+
+pp_proj_n_a_y_hat <-  tidybayes::gather_draws(one_patch_model_fit, pp_proj_n_a_y_hat[ age,year], n = 1000)
+
+
+# get real data
+n_a_y <- pop2[,1:years_train] %>% 
+  reshape::melt(varnames = c("age","year")) %>% 
+  as_tibble() 
+n_a_y_proj <- pop2[,(years_train+1):ny] %>% 
+  reshape::melt(varnames = c("age","year")) %>% 
+  as_tibble() 
+
+# get estimated selectivity at age
+sel_at_age <- gather_draws(one_patch_model_fit, mean_selectivity_at_age[age], n=1000)
+
+# calculate means, for transforming the model estimate into the same "units" as our raw data (selected by survey)
+sel <- sel_at_age %>% 
+  group_by(age) %>% 
+  summarise(sel = mean(.value))
+
+gg_n_a_y_hat <- n_a_y_hat %>% 
+  left_join(sel, by = "age") %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 
+  facet_wrap(~age, scales="free_y") + 
+  scale_fill_brewer() +
+  labs(title="model predictions")
+
+# forecast fits
+gg_pp_proj_n_a_y_hat <- pp_proj_n_a_y_hat %>%
+  left_join(sel, by = "age") %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_a_y_proj, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) +
+  scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
+  facet_wrap(~age, scales="free_y") + 
+  scale_fill_brewer() +
+  labs(title="forecast")
+
+
+gg_n_a_y_hat
+#gg_pp_n_p_a_y_hat
+gg_pp_proj_n_a_y_hat
+
+ggsave(gg_n_a_y_hat, filename=here("results","fluke_one_patch_age_structure_model_predictions.png"), scale=1.1, width=10, height=10)
+ggsave(gg_pp_proj_n_a_y_hat, filename=here("results","fluke_one_patch_age_structure_forecast.png"), scale=1.1, width=10, height=10)
+
+```
 # HERE BEGINS DAN'S OLD CODE
 
 explore data 
