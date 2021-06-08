@@ -65,9 +65,12 @@ agedat <- rawdat %>%
   mutate(
     age_floor = min(age_floor, 15)  # this is estimating a small number of super old fish, up to 24 -- I'm reclassifying them as 15 for now based on the stock assessment, is that right?
   ) %>% 
+  group_by(year, age_floor, lat_floor, haulid) %>% 
+  summarise(prep_num_at_age =sum(number_at_length)) %>%  # aggregate numbers by age within each haul
   group_by(year, age_floor, lat_floor) %>% 
-  summarise(number_at_age = sum(number_at_length)) %>% 
-  ungroup()
+  summarise(number_at_age = mean(prep_num_at_age)) %>% # average across all hauls in the band
+    ungroup() %>% 
+  mutate(number_at_age = as.integer(round(number_at_age))) # convert from density to counts 
 
 # visualize lat band sampling in fall 
 
@@ -271,8 +274,8 @@ gg_n_p_a_y_hat_ex <- n_p_a_y_hat %>%
 ggsave(gg_n_p_a_y_hat_ex, filename=here("results","fluke_pred_patch_6.png"), width=10, height=4, dpi=300)
 
 gg_n_p_a_y_hat_age_2 <- n_p_a_y_hat %>% 
-    left_join(sel, by = "age") %>% 
-filter(age==2) %>% 
+  left_join(sel, by = "age") %>% 
+  filter(age==2) %>% 
   ggplot() +
   stat_lineribbon(aes(x = year, y = .value * sel),.width = c(.99, .95, .8, .5), color = "red") +
   geom_point(data = n_p_a_y %>% filter(age==2), aes(x=year, y=value), size = 2,alpha = 0.5) + 
@@ -329,12 +332,12 @@ ggsave(gg_pp_proj_n_p_a_y_hat, filename=here("results","fluke_age_structure_fore
 ```{r fit-one-patch-model, echo=FALSE, message=FALSE}
 
 pop2 <- array(NA, dim = c(n_ages, ny)) 
-  for(a in 1:n_ages){
-    for(y in 1:ny){
-      tmp <- agedat %>% filter(age_floor==(a-1), year==y) %>% 
-        summarise(sum_number_at_age = sum(number_at_age))
-      pop2[a,y] <- tmp$sum_number_at_age
-    }
+for(a in 1:n_ages){
+  for(y in 1:ny){
+    tmp <- agedat %>% filter(age_floor==(a-1), year==y) %>% 
+      summarise(sum_number_at_age = sum(number_at_age))
+    pop2[a,y] <- tmp$sum_number_at_age
+  }
 }
 
 one_patch_data <- list(
@@ -369,14 +372,14 @@ n_chains <-  4
 n_cores <- 4 
 
 one_patch_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke_one_patch.stan"), # check that it's the right model!
-                      data = one_patch_data,
-                      chains = 4,
-                      warmup = warmups,
-                      iter = total_iterations,
-                      cores = 4,
-                      refresh = 250,
-                      control = list(max_treedepth = max_treedepth,
-                                     adapt_delta = 0.95)
+                            data = one_patch_data,
+                            chains = 4,
+                            warmup = warmups,
+                            iter = total_iterations,
+                            cores = 4,
+                            refresh = 250,
+                            control = list(max_treedepth = max_treedepth,
+                                           adapt_delta = 0.95)
 )
 
 ```
@@ -388,7 +391,7 @@ plot(one_patch_model_fit)
 
 # get estimate of true states / posterior predictive / forecast
 n_a_y_hat <-  tidybayes::gather_draws(one_patch_model_fit
-, n_a_y_hat[age,year], n = 1000)
+                                      , n_a_y_hat[age,year], n = 1000)
 
 # pp_n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, pp_n_p_a_y_hat[patch, age,year], n = 1000) # add this back into the model!
 
