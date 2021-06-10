@@ -2,6 +2,12 @@
 title: "R Notebook"
 output: html_document
 ---
+# Packages
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
 
 ```{r packages}
 set.seed(42)
@@ -14,96 +20,153 @@ library(rstan)
 library(Matrix)
 library(ggridges)
 library(rstanarm)
+source(here("functions","generate-length-to-age.R")) # from SPASM by D Ovando
 ```
+## Get summer flounder data
 
-### Size selectivity
-
-Email from Mark Terceiro at NOAA:
-
---
-The current assessment model provides estimates of NEFSC HB Bigelow survey selectivity at age for 2009-2019.
-For spring: age 0 = 0.00, age 1 = 0.75, age 2 = 0.80, age 3-7+ = 1.00 
-For fall:      age 0 = 0.72, age 1 = 0.80, age 2 = 1.00, age 3-7+ = 1.00
-
-As a rough estimation of how ages relate to lengths:
-In the spring no age 0 fish are caught, age 1 fish are generally < 36 cm, age 2 fish are 36 - 40 cm, and age 3 fish are > 40 cm.
-In the fall, age 0 fish are < 30 cm, age 1 fish are 30-40 cm, age 2 fish are 41-45 cm, and age 3 fish are > 45 cm.
---
-
-We used an L50 of 27cm as the stage 2/3 breakpoint, following SAW 66. I haven't revisited whether we should change the breakpoint for stages 1 and 2, currently 18cm (halfway between 27cm and the min length 9cm). We could develop season-specific breakpoints, but if by fall the age 1 fish include some that are reproductive anyway, I think it's fine to start classifying those as stage 3 in our model.
-
-**Size selectivity is already accounted for in generating the prepped fluke data file.**
-
-```{r}
-sel_at_stage <- c(0.01,0.1,1) # make this up for now, but assumed selectivity at stage
-```
-
- 
-### Mortality
- 
-Stock assessment SAW66 page 20:
-Fishing mortality rates and stock sizes were estimated using the ASAP statistical catch at age model. An age-specific instantaneous natural mortality rate providing an average M = 0.25 was assumed for all years. Fishing mortality on the fully selected age 4 fish ranged between 0.744 and 1.622 during 1982-1996 and then decreased to 0.245 in 2007. Since 2007 the fishing mortality rate has increased and was 0.334 in 2017. The 90% confidence interval for F in 2017 was 0.276 to 0.380. 
-
-### Growth
-
-Summer flounder seem to reach reproductive size within three years -- actually, much faster -- so I've made the growth rate 1, indicating that the probability that individuals in a size class transition to the next one in any time step is 100%.
+Note that we are now pulling in the raw length composition data, and it is for the fall survey only.
 
 ```{r data}
-flukedat <- read_csv(here("processed-data","fluke_prepped_data.csv")) %>% 
-  filter(year>=1968) %>% 
-  mutate(latround = floor(lat))
+rawdat <- read_csv(here("processed-data","fluke_catch_at_length_fall.csv"))
+```
 
-# keep only lat bands sampled every year
-latOK <- flukedat %>% 
-  select(latround, year) %>% 
+## Convert to ages 
+
+
+Page 58 of SAW 66: In the current work, the NEFSC trawl survey data for 1976-2016 (ages for 2017 were not yet available) were used to estimate growth parameters for males, females, and sexes combined for the full time series and for seven multi-year (generally five year) bins. The full time series data provide parameters for males (n = 19,424) of Linf = 63.9 cm, k = 0.18, with maximum length of 67 cm (age 6) and age of 15 (length 56-57 cm); parameters for females (n = 20,689) of Linf = 80.6 cm, k = 0.18, with maximum length of 82 cm (age 11) and age of 14 (length 76 cm); and **parameters for sexes combined (n = 40,942, including small fish of undetermined sex) of Linf = 83.6, k = 0.14, with maximum age of 15** (Table below, Figure A66).
+
+AF note: not sure how max age should be used
+
+```{r length-age}
+Loo = 83.6
+k = 0.14
+
+# Dan, can you confirm I did these right? 
+mean_age_from_length <- function(length){
+  age = log(1-length/Loo)/-k 
+  return(age)
+}
+
+# NOTE that I think this will produce zero length from zero age which we know is wrong. we need to add in a buffer for size at age 0
+mean_length_from_age <- function(age_vector){
+  length_vector = (1-exp(-k*age_vector))*Loo
+  return(length_vector)
+}
+
+rawdat$age <- mean_age_from_length(rawdat$length)
+
+hist(rawdat$age)
+
+agedat <- rawdat %>% 
+  filter(year>=1972) %>% 
+  mutate(age_floor = floor(age), # rounding up so we don't have age zero - should start at age 1
+         lat_floor = floor(lat)) %>% 
+  rowwise() %>% 
+  mutate(
+    age_floor = min(age_floor, 15)  # this is estimating a small number of super old fish, up to 24 -- I'm reclassifying them as 15 for now based on the stock assessment, is that right?
+  ) %>% 
+  group_by(year, age_floor, lat_floor, haulid) %>% 
+  summarise(prep_num_at_age =sum(number_at_length)) %>%  # aggregate numbers by age within each haul
+  group_by(year, age_floor, lat_floor) %>% 
+  summarise(number_at_age = mean(prep_num_at_age)) %>% # average across all hauls in the band
+    ungroup() %>% 
+  mutate(number_at_age = as.integer(round(number_at_age))) # convert from density to counts 
+
+# visualize lat band sampling in fall 
+
+lat_pres <- agedat %>% 
+  select(lat_floor, year) %>% 
   distinct() %>% 
-    group_by(latround) %>% 
-  summarise(n=n()) %>% 
-  filter(n==max(n)) # NEED TO CHECK THAT THESE ARE CONTINUOUS AND MAKE SENSE
+  mutate(surveyed=TRUE)
 
-flukedat %<>% filter(latround %in% latOK$latround)
+expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # get all possible band*year combos
+  left_join(agedat %>% # get df with just surveyed bands
+              select(lat_floor, year) %>% 
+              distinct() %>% 
+              mutate(surveyed=TRUE)
+  ) %>% 
+  mutate(surveyed=replace_na(surveyed, FALSE)) %>%  #classify unsurveyed rows as false
+  ggplot(aes(x=year, y=lat_floor)) +
+  geom_tile(aes(fill=surveyed)) +
+  scale_y_continuous(breaks=seq(min(agedat$lat_floor), max(agedat$lat_floor, 1)))
+# based on this, let's drop lat bands below 35 and the year 2016
 
+agedat %<>% filter(lat_floor>34, year<2016)
+
+# check that this now means all bands are surveyed in all years 
+expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # get all possible band*year combos
+  left_join(agedat %>% # get df with just surveyed bands
+              select(lat_floor, year) %>% 
+              distinct() %>% 
+              mutate(surveyed=TRUE)
+  ) %>% 
+  mutate(surveyed=replace_na(surveyed, FALSE)) %>%  #classify unsurveyed rows as false
+  ggplot(aes(x=year, y=lat_floor)) +
+  geom_tile(aes(fill=surveyed)) +
+  scale_y_continuous(breaks=seq(min(agedat$lat_floor), max(agedat$lat_floor, 1)))
+```
+
+
+## Prep for model
+
+```{r modelprep}
 ## get time dimension
-years <- sort(unique(flukedat$year)) # should we cut out pre-1968?
+years <- sort(unique(agedat$year)) 
 ny <- length(years)
 years_train <- ny-10
 years_proj <- 10
 
-flukedat <- flukedat %>%
-  filter(latround < 43)
 #get other dimensions
-patches <- sort(unique(flukedat$latround))
+patches <- sort(unique(agedat$lat_floor))
 np = length(patches) 
-ns=3
+ages <- sort(unique(agedat$age_floor))
+n_ages <- length(ages) 
+lbins <- sort(unique(rawdat$length))
+n_lbins <- length(lbins) 
+
+# make length-at-age key 
+length_at_age_key_dat <- generate_length_at_age_key(
+  min_age = min(ages), 
+  max_age = max(ages), 
+  cv = 0.2, # "magic number" - revisit this sometime (use LIME as a guide?)
+  k = k, 
+  linf = Loo,
+  t0 = 0, # is this right?
+  time_step = 1,
+  linf_buffer = 1 # doing this just to shoehorn it into the right size for the model; can make it bigger if we need to
+)
+mean_length_at_age <- map(ages,mean_length_from_age) %>% unlist()
+
+# convert to matrix 
+length_at_age_key <- as.matrix(with(length_at_age_key_dat, sparseMatrix(age, length_bin, x=p_bin, index1 = FALSE))) # index1 deals with the fact that indices start at 0 not 1
 
 # make temperature matrix
-sbtdat <- flukedat %>% 
-  group_by(latround, year) %>% 
+sbtdat <- rawdat %>% 
+  mutate(lat_floor = floor(lat)) %>% 
+  filter(lat_floor %in% unique(agedat$lat_floor),
+         year %in% unique(agedat$year)) %>% # only use lat bands in the trimmed age data
+  group_by(lat_floor, year) %>% 
   summarise(sbt=mean(btemp, na.rm=TRUE)) %>% 
   ungroup() %>% 
-  mutate(patch= as.integer(as.factor(latround)), 
+  mutate(patch= as.integer(as.factor(lat_floor)), 
          year=as.integer(as.factor(year))) %>% #change real values to indices
-  select(-latround)
+  select(-lat_floor)
 
-sbt <- as.matrix(with(sbtdat, sparseMatrix(patch, year, x=sbt))) 
+sbt <- as.matrix(with(sbtdat, sparseMatrix(patch, year, x=sbt))) # visually inspect this to be sure there are no zeroes -- they occur early in the time-series and also in 2016, but the data trimming should have taken care of it
 
 # make population matrix
-flukepop <- flukedat %>% 
-  group_by(year,latround, lengthclass) %>% 
-  summarise(count=sum(numlengthclass))%>% 
-  ungroup() %>% 
-  mutate(patch=as.integer(as.factor(latround)),
-         year=as.integer(as.factor(year)),
-         stage=recode(lengthclass, smalljuv=1, largejuv=2, adult=3),
-         count=floor(count)) %>% #change real values to indices and counts to integers (not sure if the latter is necessary)
-  select(-latround, -lengthclass)
 
-pop <- array(NA, dim = c(np, ns, ny)) 
+# add indices
+agedat$patch <- as.integer(as.factor(agedat$lat_floor))
+agedat$year <- as.integer(as.factor(agedat$year))
+
+# fill in matrix
+pop <- array(NA, dim = c(np, n_ages, ny)) 
 for(p in 1:np){
-  for(s in 1:ns){
+  for(a in 1:n_ages){
     for(y in 1:ny){
-      tmp <- flukepop %>% filter(patch==p, stage==s, year==y)
-      pop[p,s,y] <- tmp$count
+      tmp <- agedat %>% filter(patch==p, age_floor==(a-1), year==y) # here's where we convert ages to be indexed starting at 1 not 0 for ease in Stan
+      pop[p,a,y] <- tmp$number_at_age
     }
   }
 }
@@ -113,26 +176,288 @@ m = 0.25
 f = 0.334
 z = exp(-m-f)
 
-# growth
-g = 1
-
 #spillover
-spill=0.1
+# spill=0.1
 ```
+
+## fit a model
+
+```{r fit-model, echo=FALSE, message=FALSE}
+age_data <- list(
+  np=np,
+  n_ages=n_ages,
+  ny_train=years_train,
+  n_p_a_y = pop[,,1:years_train], 
+  proj_init = pop[,,1],
+  ny_proj = years_proj,
+  sst = sbt[, 1:years_train], # change these variable names sometime...
+  sst_proj = sbt[, (years_train+1):ny],
+  z=z,
+  k=k,
+  loo=Loo,
+  length_50_sel_guess=20, # THIS IS A RANDOM GUESS, I can't find help in the stock assessment
+  n_lbins = n_lbins, 
+  mean_length_at_age = mean_length_at_age, 
+  length_at_age_key = length_at_age_key[, 11:84], # DANGER! I'm ignoring the first 10 rows here to make it the same dimensions as n_lbins, just to get it to run, but recognizing that we need to deal with very small fish in the model 
+  age_sel = 0,
+  bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
+  sel_100 = 3 # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
+)
+warmups <- 2000
+total_iterations <- 4000
+max_treedepth <-  12
+n_chains <-  4
+n_cores <- 4 
+age_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), # check that it's the right model!
+                      data = age_data,
+                      chains = 4,
+                      warmup = warmups,
+                      iter = total_iterations,
+                      cores = 4,
+                      refresh = 250,
+                      control = list(max_treedepth = max_treedepth,
+                                     adapt_delta = 0.95)
+)
+```
+
+
+## evaluate the model
+
+```{r}
+launch_shinystan(age_model_fit)
+check_divergences(age_model_fit)
+plot(age_model_fit)
+
+# get estimate of true states / posterior predictive / forecast
+n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, n_p_a_y_hat[patch, age,year], n = 1000)
+
+# pp_n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, pp_n_p_a_y_hat[patch, age,year], n = 1000) # add this back into the model!
+
+pp_proj_n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, pp_proj_n_p_a_y_hat[patch, age,year], n = 1000)
+
+
+# get real data
+n_p_a_y <- pop[,,1:years_train] %>% 
+  reshape::melt(varnames = c("patch","age","year")) %>% 
+  as_tibble() 
+n_p_a_y_proj <- pop[,,(years_train+1):ny] %>% 
+  reshape::melt(varnames = c("patch","age","year")) %>% 
+  as_tibble() 
+
+# get estimated selectivity at age
+sel_at_age <- gather_draws(age_model_fit, mean_selectivity_at_age[age], n=1000)
+
+# calculate means, for transforming the model estimate into the same "units" as our raw data (selected by survey)
+sel <- sel_at_age %>% 
+  group_by(age) %>% 
+  summarise(sel = mean(.value))
+
+gg_n_p_a_y_hat <- n_p_a_y_hat %>% 
+  left_join(sel, by = "age") %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 
+  facet_grid(age~patch, scales="free_y") + 
+  scale_fill_brewer() +
+  labs(title="model predictions")
+
+
+gg_n_p_a_y_hat_ex <- n_p_a_y_hat %>% 
+  left_join(sel, by = "age") %>% 
+  filter(patch==6) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 
+  facet_wrap(~age, scales="free_y", ncol=8) + 
+  scale_fill_brewer() +
+  labs(title="model predictions", x="year", y="count")
+ggsave(gg_n_p_a_y_hat_ex, filename=here("results","fluke_pred_patch_6.png"), width=10, height=4, dpi=300)
+
+gg_n_p_a_y_hat_age_2 <- n_p_a_y_hat %>% 
+  left_join(sel, by = "age") %>% 
+  filter(age==2) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y %>% filter(age==2), aes(x=year, y=value), size = 2,alpha = 0.5) + 
+  facet_wrap(~patch, scales="free_y") + 
+  scale_fill_brewer() +
+  labs(title="age 2")
+
+
+# posterior predictive fits
+# gg_pp_n_p_a_y_hat <- pp_n_p_a_y_hat %>% 
+#   ggplot() +
+#   stat_lineribbon(aes(x = year, y = .value, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+#   geom_point(data = n_p_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 
+#     scale_y_continuous(limits=c(0,500)) + # changed from free scales to constrain y-axis
+# facet_grid(patch~age) + 
+#   scale_fill_brewer()+
+#   labs(title="posterior predictive fit")
+
+# forecast fits
+gg_pp_proj_n_p_a_y_hat <- pp_proj_n_p_a_y_hat %>%
+  left_join(sel, by = "age") %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y_proj, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) +
+  scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
+  facet_grid(age~patch, scales="free_y") + 
+  scale_fill_brewer() +
+  labs(title="forecast")
+
+gg_pp_proj_n_p_a_y_hat_ex <- pp_proj_n_p_a_y_hat %>%
+  left_join(sel, by = "age") %>% 
+  filter(patch==6) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y_proj, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) +
+  scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
+  facet_wrap(~age, ncol=8, scales="free_y") + 
+  scale_fill_brewer() +
+  labs(title="forecast", x="year", y="count")
+ggsave(gg_pp_proj_n_p_a_y_hat_ex, filename=here("results","fluke_forecast_patch_6.png"), width=10, height=4, dpi=300)
+
+gg_n_p_a_y_hat
+#gg_pp_n_p_a_y_hat
+gg_pp_proj_n_p_a_y_hat
+
+ggsave(gg_n_p_a_y_hat, filename=here("results","fluke_age_structure_model_predictions.png"), scale=1.5, width=6, height=10)
+ggsave(gg_pp_proj_n_p_a_y_hat, filename=here("results","fluke_age_structure_forecast.png"), scale=1.5, width=6, height=10)
+
+```
+
+
+## Fit one-patch model
+
+```{r fit-one-patch-model, echo=FALSE, message=FALSE}
+
+pop2 <- array(NA, dim = c(n_ages, ny)) 
+for(a in 1:n_ages){
+  for(y in 1:ny){
+    tmp <- agedat %>% filter(age_floor==(a-1), year==y) %>% 
+      summarise(sum_number_at_age = sum(number_at_age))
+    pop2[a,y] <- tmp$sum_number_at_age
+  }
+}
+
+one_patch_data <- list(
+  np=np,
+  n_ages=n_ages,
+  ny_train=years_train,
+  n_a_y = pop2[,1:years_train], 
+  proj_init = pop2[,1],
+  ny_proj = years_proj,
+  sst = sbtdat %>% group_by(year) %>% summarise(meansbt = mean(sbt)) %>% filter(year <= years_train) %>% pull(meansbt),
+  sst_proj = sbtdat %>% group_by(year) %>% summarise(meansbt = mean(sbt)) %>% filter(year > years_train) %>% pull(meansbt),
+  z=z,
+  k=k,
+  loo=Loo,
+  length_50_sel_guess=20, # THIS IS A RANDOM GUESS, I can't find help in the stock assessment
+  n_lbins = n_lbins, 
+  mean_length_at_age = mean_length_at_age, 
+  length_at_age_key = length_at_age_key[, 11:84], # DANGER! I'm ignoring the first 10 rows here to make it the same dimensions as n_lbins, just to get it to run, but recognizing that we need to deal with very small fish in the model 
+  age_sel = 0,
+  bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
+  sel_100 = 3 # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
+)
+
+warmups <- 2000
+
+total_iterations <- 4000
+
+max_treedepth <-  12
+
+n_chains <-  4
+
+n_cores <- 4 
+
+one_patch_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke_one_patch.stan"), # check that it's the right model!
+                            data = one_patch_data,
+                            chains = 4,
+                            warmup = warmups,
+                            iter = total_iterations,
+                            cores = 4,
+                            refresh = 250,
+                            control = list(max_treedepth = max_treedepth,
+                                           adapt_delta = 0.95)
+)
+
+```
+## Evaluate one-patch model
+```{r}
+launch_shinystan(one_patch_model_fit)
+check_divergences(one_patch_model_fit)
+plot(one_patch_model_fit)
+
+# get estimate of true states / posterior predictive / forecast
+n_a_y_hat <-  tidybayes::gather_draws(one_patch_model_fit
+                                      , n_a_y_hat[age,year], n = 1000)
+
+# pp_n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, pp_n_p_a_y_hat[patch, age,year], n = 1000) # add this back into the model!
+
+pp_proj_n_a_y_hat <-  tidybayes::gather_draws(one_patch_model_fit, pp_proj_n_a_y_hat[ age,year], n = 1000)
+
+
+# get real data
+n_a_y <- pop2[,1:years_train] %>% 
+  reshape::melt(varnames = c("age","year")) %>% 
+  as_tibble() 
+n_a_y_proj <- pop2[,(years_train+1):ny] %>% 
+  reshape::melt(varnames = c("age","year")) %>% 
+  as_tibble() 
+
+# get estimated selectivity at age
+sel_at_age <- gather_draws(one_patch_model_fit, mean_selectivity_at_age[age], n=1000)
+
+# calculate means, for transforming the model estimate into the same "units" as our raw data (selected by survey)
+sel <- sel_at_age %>% 
+  group_by(age) %>% 
+  summarise(sel = mean(.value))
+
+gg_n_a_y_hat <- n_a_y_hat %>% 
+  left_join(sel, by = "age") %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 
+  facet_wrap(~age, scales="free_y") + 
+  scale_fill_brewer() +
+  labs(title="model predictions")
+
+# forecast fits
+gg_pp_proj_n_a_y_hat <- pp_proj_n_a_y_hat %>%
+  left_join(sel, by = "age") %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_a_y_proj, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) +
+  scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
+  facet_wrap(~age, scales="free_y") + 
+  scale_fill_brewer() +
+  labs(title="forecast")
+
+
+gg_n_a_y_hat
+#gg_pp_n_p_a_y_hat
+gg_pp_proj_n_a_y_hat
+
+ggsave(gg_n_a_y_hat, filename=here("results","fluke_one_patch_age_structure_model_predictions.png"), scale=1.1, width=10, height=10)
+ggsave(gg_pp_proj_n_a_y_hat, filename=here("results","fluke_one_patch_age_structure_forecast.png"), scale=1.1, width=10, height=10)
+
+```
+# HERE BEGINS DAN'S OLD CODE
 
 explore data 
 
 ```{r explore-data}
 
 
-  flukepop %>% 
+flukepop %>% 
   group_by(patch) %>% 
   mutate(scount = count / max(count)) %>% 
   ungroup() %>% 
-    # filter(year > 40, patch == 4) %>% 
+  # filter(year > 40, patch == 4) %>% 
   ggplot(aes(stage,scount, fill = factor(patch))) + 
   geom_col(position = "dodge") + 
-    facet_wrap(~year)
+  facet_wrap(~year)
 
 
 flukepop %>% 
@@ -142,7 +467,7 @@ flukepop %>%
 flukepop %>% 
   group_by(year,patch) %>% 
   summarise(hmm = (count[stage ==3] == 0 & sum(count) > 0))
-  
+
 ```
 # New Model Idea
 
@@ -263,15 +588,15 @@ n_chains <-  4
 n_cores <- 4 
 
 stage_model_fit <- stan(file = here::here("src","T_dep_rec_fluke.stan"), # check that it's the right model!
-           data = stage_data,
-           chains = 4,
-           warmup = warmups,
-           iter = total_iterations,
-           cores = 4,
-           refresh = 250,
-           control = list(max_treedepth = max_treedepth,
-                          adapt_delta = 0.95)
-           )
+                        data = stage_data,
+                        chains = 4,
+                        warmup = warmups,
+                        iter = total_iterations,
+                        cores = 4,
+                        refresh = 250,
+                        control = list(max_treedepth = max_treedepth,
+                                       adapt_delta = 0.95)
+)
 
 ```
 
