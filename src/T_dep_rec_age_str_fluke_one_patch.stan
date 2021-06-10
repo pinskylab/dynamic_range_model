@@ -115,7 +115,17 @@ transformed parameters{
   
   mean_recruits = exp(log_mean_recruits);
   
-  n_a_y_hat[1:n_ages,1] = n_a_y[1:n_ages,1]; // initialize population with "known" values
+  print("mean recruits is ",mean_recruits);
+  
+for(a in 1:n_ages){
+    if(a==1){
+      n_a_y_hat[a,1] = mean_recruits; // initialize age 0 with mean recruitment
+    }
+    else{
+      n_a_y_hat[a,1] = n_a_y_hat[a-1,1] * exp(z); // initialize population with mean recruitment propogated through age classes with mortality
+  }
+  } // close for loop
+//  n_a_y_hat[1:n_ages,1] = n_a_y[1:n_ages,1]; // initialize population with "known" values
   
   for(y in 1:ny_train){
     T_adjust[y] = T_dep(sst[y], Topt, width); // calculate temperature-dependence correction factor for each patch and year depending on SST 
@@ -181,21 +191,21 @@ model {
       n_a_y_transform[a] = n_a_y_hat[a,y] .* mean_selectivity_at_age[a];
     }
     
-    print("adjusted counts at age in year ",y," are ",n_a_y_transform); // check that counts are different for every year
+   // print("adjusted counts at age in year ",y," are ",n_a_y_transform); // check that counts are different for every year
     
     raw[y-1] ~ normal(0,sigma_r); // prior on raw process error (sorry this is kinda buried in the multinomial stuff)
 
     // if(sum(n_a_y[sel_100:n_ages,y]) > 0) { // this was still passing some vectors of all zeros to the multinomial, so I replaced  it with:
     // QUESTION: before we were conditioning on the sum true counts being >0. but if the sum *modeled* counts aren't >0, the multinomial doesn't work... so is it OK to condition on those instead?
     
-    if(sum(n_a_y_transform[1:n_ages]) > 0) {
+    if(sum(n_a_y_transform[1:n_ages]) > 0 && sum(n_a_y[sel_100:n_ages,y]) > 0) {
       
       // multinomial to estimate relative abundance of stages
       
       n_a_y[1:n_ages,y] ~ multinomial(n_a_y_transform[1:n_ages] / sum(n_a_y_transform[1:n_ages])); // did I parameterize this right?
       
       // negative binomial to estimate absolute abundance (counts) -- was calibrated  to stage 3 before -- now to sum count
-      n_a_y[n_ages,y] ~ neg_binomial_2(sum(n_a_y_transform[1:n_ages]) + 1e-3, phi_obs); 
+      sum(n_a_y[1:n_ages,y]) ~ neg_binomial_2(sum(n_a_y_transform[1:n_ages]) + 1e-3, phi_obs); 
       // FLAG -- is this the right way to recalibrate the magnitude of n_a_y by the absolute scale?
       
       1 ~ bernoulli(theta);

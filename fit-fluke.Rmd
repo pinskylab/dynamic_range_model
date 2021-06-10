@@ -373,10 +373,10 @@ n_cores <- 4
 
 one_patch_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke_one_patch.stan"), # check that it's the right model!
                             data = one_patch_data,
-                            chains = 4,
+                            chains = 1,
                             warmup = warmups,
                             iter = total_iterations,
-                            cores = 4,
+                            cores = 1,
                             refresh = 250,
                             control = list(max_treedepth = max_treedepth,
                                            adapt_delta = 0.95)
@@ -385,7 +385,7 @@ one_patch_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke_one
 ```
 ## Evaluate one-patch model
 ```{r}
-launch_shinystan(one_patch_model_fit)
+#launch_shinystan(one_patch_model_fit)
 check_divergences(one_patch_model_fit)
 plot(one_patch_model_fit)
 
@@ -408,6 +408,9 @@ n_a_y_proj <- pop2[,(years_train+1):ny] %>%
 
 # get estimated selectivity at age
 sel_at_age <- gather_draws(one_patch_model_fit, mean_selectivity_at_age[age], n=1000)
+
+# get detection probability
+theta_est <- gather_draws(one_patch_model_fit, theta, n=1000)
 
 # calculate means, for transforming the model estimate into the same "units" as our raw data (selected by survey)
 sel <- sel_at_age %>% 
