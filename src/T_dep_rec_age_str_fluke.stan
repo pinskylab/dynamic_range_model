@@ -230,41 +230,47 @@ model {
     // the n_p_a_y_transform business is here to force Stan to multiply a real (pop size) by a vector (mean sel) to pass to the multinomial
     // it didn't mind this before and I'm not sure what changed!
     //vector[n_ages] n_a_y_transform; // should get recreated for every y
-    matrix[np, n_ages] n_p_a_y_transform; // 
+    // matrix[np, n_ages] n_p_a_y_transform; // 
     
-    for(p in 1:np){
-    for(a in 1:n_ages){
-      n_p_a_y_transform[p,a] = n_p_a_y_hat[p,a,y] .* mean_selectivity_at_age[a];
-    }
-    }
-    
-    // print("adjusted counts at age in year ",y," are ",n_a_y_transform); // check that counts are different for every year
-    
-    raw[y-1] ~ normal(0,sigma_r); // prior on raw process error (sorry this is kinda buried in the multinomial stuff)
-    
-    // if(sum(n_a_y[sel_100:n_ages,y]) > 0) { // this was still passing some vectors of all zeros to the multinomial, so I replaced  it with:
-    // QUESTION: before we were conditioning on the sum true counts being >0. but if the sum *modeled* counts aren't >0, the multinomial doesn't work... so is it OK to condition on those instead?
-    
-    if(sum(n_a_y_transform[1:n_ages]) > 0 && sum(n_a_y[sel_100:n_ages,y]) > 0) {
-      
-      // multinomial to estimate relative abundance of stages
-      
-      n_a_y[1:n_ages,y] ~ multinomial(n_a_y_transform[1:n_ages] / sum(n_a_y_transform[1:n_ages])); // did I parameterize this right?
-      
-      // negative binomial to estimate absolute abundance (counts) -- was calibrated  to stage 3 before -- now to sum count
-      sum(n_a_y[1:n_ages,y]) ~ neg_binomial_2(sum(n_a_y_transform[1:n_ages]) + 1e-3, phi_obs); 
-      // FLAG -- is this the right way to recalibrate the magnitude of n_a_y by the absolute scale?
-      
-      1 ~ bernoulli(theta);
-      
-      
-    } else { // only evaluate length comps if there are length comps to evaluate
-    
-    0 ~ bernoulli(theta);
-    
-    } // close else 
-    
-    
+    //  for(p in 1:np){
+      //    for(a in 1:n_ages){
+        //      n_p_a_y_transform[p,a] = n_p_a_y_hat[p,a,y] .* mean_selectivity_at_age[a];
+        //    }
+        //  }
+        
+        // print("adjusted counts at age in year ",y," are ",n_a_y_transform); // check that counts are different for every year
+        
+        raw[y-1] ~ normal(0,sigma_r); // prior on raw process error (sorry this is kinda buried in the multinomial stuff)
+        
+        // if(sum(n_a_y[sel_100:n_ages,y]) > 0) { // this was still passing some vectors of all zeros to the multinomial, so I replaced  it with:
+        // QUESTION: before we were conditioning on the sum true counts being >0. but if the sum *modeled* counts aren't >0, the multinomial doesn't work... so is it OK to condition on those instead?
+        
+        
+        for(p in 1:np){
+          //   if(sum(n_a_y_transform[1:n_ages]) > 0 && sum(n_a_y[sel_100:n_ages,y]) > 0) {
+            if(sum(n_p_a_y[p,sel_100:n_ages,y]) > 0) {
+              
+              // multinomial to estimate relative abundance of stages
+              
+              /// n_a_y[1:n_ages,y] ~ multinomial(n_a_y_transform[1:n_ages] / sum(n_a_y_transform[1:n_ages])); // did I parameterize this right?
+              
+              // negative binomial to estimate absolute abundance (counts) -- was calibrated  to stage 3 before -- now to sum count
+              //   sum(n_a_y[1:n_ages,y]) ~ neg_binomial_2(sum(n_a_y_transform[1:n_ages]) + 1e-3, phi_obs); 
+              // FLAG -- is this the right way to recalibrate the magnitude of n_a_y by the absolute scale?
+              // n_p_a_y[p,1:ns,y] ~ multinomial(to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage);
+              n_p_a_y[p,1:n_ages,y] ~ multinomial((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age) / sum(to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age));
+              sum(n_p_a_y[p,1:n_ages,y]) ~ neg_binomial_2(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)) + 1e-3, phi_obs); 
+              
+              1 ~ bernoulli(theta);
+              
+              
+            } else { // only evaluate length comps if there are length comps to evaluate
+            
+            0 ~ bernoulli(theta);
+            
+            } // close else 
+        } // close patch loop
+        
   } // close year loop
   
   
@@ -272,22 +278,23 @@ model {
 
 generated quantities{
   
-  real pp_proj_n_a_y_hat[n_ages, ny_proj];
+  real pp_proj_n_p_a_y_hat[np,n_ages, ny_proj];
   
-  real tmp_proj[n_ages, ny_proj];
+  real tmp_proj[np,n_ages, ny_proj];
   
   real rec_dev_proj[ny_proj - 1];
   
-  real T_adjust_proj[ny_proj];
+  real T_adjust_proj[np,ny_proj];
   
   real pp_theta;
   
   real seen;
   
-  for(y in 1:ny_proj){
-    T_adjust_proj[y] = T_dep(sst_proj[y], Topt, width); // calculate temperature-dependence correction factor for each patch and year depending on SST 
+  for(p in 1:np){
+    for(y in 1:ny_proj){
+      T_adjust_proj[p,y] = T_dep(sst_proj[p,y], Topt, width); // calculate temperature-dependence correction factor for each patch and year depending on SST 
+    }
   }
-  
   
   // generate posterior predictives for the testing data aka project recruitment deviates into the future
   
@@ -310,49 +317,66 @@ generated quantities{
         }
       }
       
+      // project pop dy
+      for(p in 1:np){
+        
+        for(y in 1:ny_proj){
+          
+          if(y==1){
+            // initiate projection with fixed observation
+            for(a in 1:n_ages){
+              pp_proj_n_p_a_y_hat[p,a,1] = proj_init[p,a]; 
+              tmp_proj[p,a, 1] = proj_init[p,a];
+            }
+          } else { // add case for all other years
+          
+          for(a in 1:n_ages){
+            
+            // project age 1
+            if(a==1){
+              tmp_proj[p,1, y] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2) * T_adjust_proj[p,y]; 
+            }
+            // project non-reproductive ages
+            else if(a < age_at_maturity){
+              tmp_proj[p,a,y] = tmp_proj[p,a-1,y-1] * (1-z);// these just grow and die in the patch
+            }
+            // project reproductive ages
+            else{
+              if(p==1){
+                tmp_proj[p,a,y] = tmp_proj[p, a-1, y-1] * (1-z) * (1-d) + tmp_proj[p+1, a-1, y-1] * (1-z) * d;
+              } // close patch 1 case 
+              
+              else if(p==np){
+                tmp_proj[p,a,y] = tmp_proj[p, a-1, y-1] * (1-z) * (1-d) + tmp_proj[p-1, a-1, y-1] * (1-z) * d;
+              } // close highest patch
+              
+              else{
+                tmp_proj[p,a,y] = tmp_proj[p, a-1, y-1] * (1-z) * 2*(1-d) + tmp_proj[p-1, a-1, y-1] * (1-z) * d + tmp_proj[p+1, a-1, y-1] * (1-z) * d;
+                
+              } // close if/else for main patches
+              
+            } // close else for reproductive age group
+            
+            
+          } // close age loop
+          } // close else for all years except the initial one 
+        } // close year loop
+      } // close patch loop -- end of pop dy
       
-      for(a in 1:n_ages){
-        pp_proj_n_a_y_hat[a,1] = proj_init[a]; // initiate projection with fixed observation
-        tmp_proj[a, 1] = proj_init[a];
-      }
       
+      // simulate selectivity and sampling error
+      for(p in 1:np){
+        for(y in 1:ny_proj){
+          pp_theta = bernoulli_rng(theta);
+          
+          pp_proj_n_p_a_y_hat[p,1:n_ages,y] = multinomial_rng(((to_vector(tmp_proj[p,1:n_ages,y]) .* mean_selectivity_at_age) / sum((to_vector(tmp_proj[p,1:n_ages,y]) .* mean_selectivity_at_age))), 1000);
+          
+          sum(pp_proj_n_p_a_y_hat[p, 1:n_ages, y]) = pp_theta * neg_binomial_2_rng(sum(tmp_proj[p,1:n_ages,y] .* mean_selectivity_at_age) + 1e-3, phi_obs); 
+          
+        } // close year loop
+        
+      } // close patch loop
       
-      // separate loop for projecting pop because we added stage structure
-      
-      for(y in 2:ny_proj){
-        
-        // project stage 1 (recruitment)
-        tmp_proj[1, y] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2) * T_adjust_proj[y]; // added in T-dependence here 
-        //        print("proj recruits in patch: ",p," year: ",y," is ",tmp_proj[p,1,y]);
-        
-        
-        // age 1+ dispersal
-        
-        for(a in 2:n_ages){
-          
-          tmp_proj[a, y] = tmp_proj[a-1, y-1] * (1-z);
-          
-          //  print("tmp_proj at age: ",a," patch: ",p," year: ",y," is ",tmp_proj[p,a,y]);
-          
-        } // close age loop
-        
-        // simulate selectivity and sampling error, at the moment only for stage 3 for weird reasons
-        // AF: I just pooled these so that both are added for every age but I'm sure it's wrong somehow 
-        
-        
-        pp_theta = theta; // calculate detection probability
-        
-        seen = bernoulli_rng(pp_theta);
-        
-        for (a in 1:n_ages){
-          
-          pp_proj_n_a_y_hat[a, y] = seen * neg_binomial_2_rng(tmp_proj[a,y] + 1e-3, phi_obs) * mean_selectivity_at_age[a]; // is it OK to have added the 0.001 buffer here?
-          
-        }
-        
-        // pp_proj_n_p_a_y_hat[p, 1:ns, y] = multinomial_rng(to_vector(tmp[p, 1:ns, y]) / sum(to_vector(tmp[p, 1:ns, y])), 100);
-        
-      } // close year loop
       
 } // close generated quantities
 
