@@ -70,7 +70,7 @@ agedat <- rawdat %>%
   group_by(year, age_floor, lat_floor) %>% 
   summarise(number_at_age = mean(prep_num_at_age)) %>% # average across all hauls in the band
     ungroup() %>% 
-  mutate(number_at_age = as.integer(round(number_at_age))) # convert from density to counts 
+  mutate(number_at_age = as.integer(ceiling(number_at_age))) # convert from density to counts, rounding up so that any positive encounter is at least a 1 (the averages are almost all between 0 and 1 so this  is a big assumption) 
 
 # visualize lat band sampling in fall 
 
@@ -158,7 +158,7 @@ sbt <- as.matrix(with(sbtdat, sparseMatrix(patch, year, x=sbt))) # visually insp
 
 # add indices
 agedat$patch <- as.integer(as.factor(agedat$lat_floor))
-agedat$year <- as.integer(as.factor(agedat$year))
+agedat$year <- as.integer(as.factor(agedat$year)) 
 
 # fill in matrix
 pop <- array(NA, dim = c(np, n_ages, ny)) 
@@ -176,8 +176,8 @@ m = 0.25
 f = 0.334
 z = exp(-m-f)
 
-#spillover
-# spill=0.1
+# dispersal
+age_at_maturity = 2
 ```
 
 ## fit a model
@@ -188,7 +188,7 @@ age_data <- list(
   n_ages=n_ages,
   ny_train=years_train,
   n_p_a_y = pop[,,1:years_train], 
-  proj_init = pop[,,1],
+  proj_init = pop[,,(years_train+1)],
   ny_proj = years_proj,
   sst = sbt[, 1:years_train], # change these variable names sometime...
   sst_proj = sbt[, (years_train+1):ny],
@@ -201,7 +201,8 @@ age_data <- list(
   length_at_age_key = length_at_age_key[, 11:84], # DANGER! I'm ignoring the first 10 rows here to make it the same dimensions as n_lbins, just to get it to run, but recognizing that we need to deal with very small fish in the model 
   age_sel = 0,
   bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
-  sel_100 = 3 # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
+  sel_100 = 3, # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
+  age_at_maturity = age_at_maturity
 )
 warmups <- 2000
 total_iterations <- 4000
@@ -210,7 +211,7 @@ n_chains <-  4
 n_cores <- 4 
 age_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), # check that it's the right model!
                       data = age_data,
-                      chains = 4,
+                      chains = 1,
                       warmup = warmups,
                       iter = total_iterations,
                       cores = 4,

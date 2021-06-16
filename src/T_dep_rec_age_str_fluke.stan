@@ -117,13 +117,13 @@ transformed parameters{
   
   mean_selectivity_at_age = length_at_age_key * selectivity_at_bin; // calculate mean selectivity at age given variance in length at age
   
-  print("mean selectivity at age is ",mean_selectivity_at_age); // check that counts are different for every year
+  //print("mean selectivity at age is ",mean_selectivity_at_age); // check that counts are different for every year
   
   sigma_r = exp(log_sigma_r);
   
   mean_recruits = exp(log_mean_recruits);
   
-  print("mean recruits is ",mean_recruits);
+  //print("mean recruits is ",mean_recruits);
   
   // fill in year 1 of n_p_a_y_hat 
   for(p in 1:np){
@@ -248,7 +248,10 @@ model {
         
         for(p in 1:np){
           //   if(sum(n_a_y_transform[1:n_ages]) > 0 && sum(n_a_y[sel_100:n_ages,y]) > 0) {
-            if(sum(n_p_a_y[p,sel_100:n_ages,y]) > 0) {
+            
+            // this should work just with the n_p_a_y clause, but I get this error:
+            // Exception: multinomial_lpmf: Probabilities parameter is not a valid simplex. sum(Probabilities parameter) = -nan, but should be 1  (in 'modelea1f73d5b5cc_T_dep_rec_age_str_fluke' at line 261)
+            if(sum(n_p_a_y[p,sel_100:n_ages,y]) > 0 && sum(n_p_a_y_hat[p,1:n_ages,y]) > 0) {
               
               // multinomial to estimate relative abundance of stages
               
@@ -281,6 +284,8 @@ generated quantities{
   real pp_proj_n_p_a_y_hat[np,n_ages, ny_proj];
   
   real tmp_proj[np,n_ages, ny_proj];
+  
+  real n_p_a_y_proj[np,n_ages, ny_proj]; // adding this as a post-selectivity forecast 
   
   real rec_dev_proj[ny_proj - 1];
   
@@ -369,9 +374,20 @@ generated quantities{
         for(y in 1:ny_proj){
           pp_theta = bernoulli_rng(theta);
           
-          pp_proj_n_p_a_y_hat[p,1:n_ages,y] = multinomial_rng(((to_vector(tmp_proj[p,1:n_ages,y]) .* mean_selectivity_at_age) / sum((to_vector(tmp_proj[p,1:n_ages,y]) .* mean_selectivity_at_age))), 1000);
+          // right now we're just missing the whole negative binomial process because I am not sure how it fits in with the multinomial
+          // since this is a calculation we can't just set pp_proj_n_p_a_y_hat equal to two things
+          // is 1000 reasonable here? 
           
-          sum(pp_proj_n_p_a_y_hat[p, 1:n_ages, y]) = pp_theta * neg_binomial_2_rng(sum(tmp_proj[p,1:n_ages,y] .* mean_selectivity_at_age) + 1e-3, phi_obs); 
+          if(sum(tmp_proj[p,1:n_ages,y]) > 0){
+          pp_proj_n_p_a_y_hat[p,1:n_ages,y] = multinomial_rng(to_vector(tmp_proj[p,1:n_ages,y]) / sum(to_vector(tmp_proj[p,1:n_ages,y])), 1000);
+          
+          } else {
+            for(a in 1:n_ages){
+                      pp_proj_n_p_a_y_hat[p,a,y] = 0;
+            }
+          }
+          // impose selectivity on pp_proj_n_p_a_y_hat so we can compare it to the data 
+          n_p_a_y_proj[p,1:n_ages,y] = to_array_1d(to_vector(pp_proj_n_p_a_y_hat[p,1:n_ages,y]) .* to_vector(mean_selectivity_at_age));
           
         } // close year loop
         
