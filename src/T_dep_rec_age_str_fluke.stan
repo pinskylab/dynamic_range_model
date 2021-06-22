@@ -293,8 +293,6 @@ generated quantities{
   
   real pp_theta;
   
-  real seen;
-  
   for(p in 1:np){
     for(y in 1:ny_proj){
       T_adjust_proj[p,y] = T_dep(sst_proj[p,y], Topt, width); // calculate temperature-dependence correction factor for each patch and year depending on SST 
@@ -362,6 +360,7 @@ generated quantities{
               
             } // close else for reproductive age group
             
+            print("tmp_proj for patch ",p,", year ",y,", age ",a,", is: ",tmp_proj[p,a,y]); 
             
           } // close age loop
           } // close else for all years except the initial one 
@@ -372,12 +371,11 @@ generated quantities{
       // simulate selectivity and sampling error
       for(p in 1:np){
         for(y in 1:ny_proj){
-          pp_theta = bernoulli_rng(theta);
+          pp_theta = bernoulli_rng(theta); // not being used for anything right now
           
           // right now we're just missing the whole negative binomial process because I am not sure how it fits in with the multinomial
           // since this is a calculation we can't just set pp_proj_n_p_a_y_hat equal to two things
-          // is 1000 reasonable here? 
-          
+
           if(sum(tmp_proj[p,1:n_ages,y]) > 0){
           pp_proj_n_p_a_y_hat[p,1:n_ages,y] = multinomial_rng(to_vector(tmp_proj[p,1:n_ages,y]) / sum(to_vector(tmp_proj[p,1:n_ages,y])), 1000);
           
