@@ -20,7 +20,10 @@ library(rstan)
 library(Matrix)
 library(ggridges)
 library(rstanarm)
-source(here("functions","generate-length-to-age.R")) # from SPASM by D Ovando
+library(spasm)
+#install from
+# devtools::install_github("danovando/spasm")
+#source(here("functions","generate-length-to-age.R")) # from SPASM by D Ovando
 ```
 ## Get summer flounder data
 
@@ -125,7 +128,7 @@ lbins <- sort(unique(rawdat$length))
 n_lbins <- length(lbins) 
 
 # make length-at-age key 
-length_at_age_key_dat <- generate_length_at_age_key(
+length_at_age_key_dat <- spasm::generate_length_at_age_key(
   min_age = min(ages), 
   max_age = max(ages), 
   cv = 0.2, # "magic number" - revisit this sometime (use LIME as a guide?)
@@ -151,6 +154,8 @@ sbtdat <- rawdat %>%
   mutate(patch= as.integer(as.factor(lat_floor)), 
          year=as.integer(as.factor(year))) %>% #change real values to indices
   select(-lat_floor)
+
+sbtdat$sbt[is.na(sbtdat$sbt)] <- mean(sbtdat$sbt, na.rm = TRUE)
 
 sbt <- as.matrix(with(sbtdat, sparseMatrix(patch, year, x=sbt))) # visually inspect this to be sure there are no zeroes -- they occur early in the time-series and also in 2016, but the data trimming should have taken care of it
 

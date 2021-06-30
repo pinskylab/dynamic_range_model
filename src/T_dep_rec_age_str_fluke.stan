@@ -321,10 +321,11 @@ generated quantities{
       }
       
       // project pop dy
-      for(p in 1:np){
+      
+      for(y in 1:ny_proj){
+
+        for(p in 1:np){
         
-        for(y in 1:ny_proj){
-          
           if(y==1){
             // initiate projection with fixed observation
             for(a in 1:n_ages){
