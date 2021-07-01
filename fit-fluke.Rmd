@@ -230,10 +230,10 @@ age_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), #
 ## evaluate the model
 
 ```{r}
-launch_shinystan(age_model_fit)
+#launch_shinystan(age_model_fit)
 check_divergences(age_model_fit)
 plot(age_model_fit)
-
+ 
 # get estimate of true states / posterior predictive / forecast
 n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, n_p_a_y_hat[patch, age,year], n = 1000)
 
@@ -306,7 +306,7 @@ gg_pp_proj_n_p_a_y_hat <- pp_proj_n_p_a_y_hat %>%
   ggplot() +
   stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
   geom_point(data = n_p_a_y_proj, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) +
-  scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
+  #scale_y_continuous(limits=c(0,200)) + # changed from free scales to constrain y-axis
   facet_grid(age~patch, scales="free_y") + 
   scale_fill_brewer() +
   labs(title="forecast")

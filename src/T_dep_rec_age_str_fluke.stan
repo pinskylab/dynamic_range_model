@@ -117,7 +117,7 @@ transformed parameters{
   
   mean_selectivity_at_age = length_at_age_key * selectivity_at_bin; // calculate mean selectivity at age given variance in length at age
   
-  //print("mean selectivity at age is ",mean_selectivity_at_age); // check that counts are different for every year
+//  print("mean selectivity at age is ",mean_selectivity_at_age); // check that counts are different for every year
   
   sigma_r = exp(log_sigma_r);
   
@@ -132,8 +132,20 @@ transformed parameters{
         n_p_a_y_hat[p,a,1] = mean_recruits; // initialize age 0 with mean recruitment in every patch
       }
       else{
-        n_p_a_y_hat[p,a,1] = n_p_a_y_hat[p,a-1,1] * exp(z); // initialize population with mean recruitment propogated through age classes with mortality
+        n_p_a_y_hat[p,a,1] = n_p_a_y_hat[p,a-1,1] * (1-z); // initialize population with mean recruitment propogated through age classes with mortality
       }
+      // TRIED BACKING INIT POP SIZE OUT FROM COUNT AT SEL_100, BUT IT CAUSED THIS ERROR:
+      // Chain 1: Rejecting initial value:
+//Chain 1:   Error evaluating the log probability at the initial value.
+//Chain 1: Exception: multinomial_lpmf: Probabilities parameter is not a valid simplex. sum(Probabilities parameter) = -nan, but should be 1  (in 'modelb55735c34310_T_dep_rec_age_str_fluke' at line 272)
+      // else if(a>=sel_100){
+      //   n_p_a_y_hat[p,a,1] = n_p_a_y[p,a,1];
+      // }
+      // else{
+      //   // backing out pre-fully-selected pop sizes to kick off the model
+      //   n_p_a_y_hat[p,a,1] = n_p_a_y[p,sel_100,1] / pow(1-z, (sel_100-a)); 
+      // }
+  //    print("initial pop size for patch ",p," and age ",a," is ",n_p_a_y_hat[p,a,1]);
     } // close ages
   } // close patches
   
@@ -330,7 +342,7 @@ generated quantities{
             // initiate projection with fixed observation
             for(a in 1:n_ages){
               //      pp_proj_n_p_a_y_hat[p,a,1] = proj_init[p,a]; 
-              tmp_proj[p,a, 1] = proj_init[p,a] / mean_selectivity_at_age[a]; // transform into pre-selectivity units
+              tmp_proj[p,a, 1] = fmin(proj_init[p,a] / mean_selectivity_at_age[a], 0); // transform into pre-selectivity units
             }
           } else { // add case for all other years
           
@@ -368,11 +380,11 @@ generated quantities{
         } // close year loop
       } // close patch loop -- end of pop dy
       
-      // apply selectivity to tmp_proj
+      // no longer trying to simulate selectivity/sampling process 
       for(p in 1:np){
         for(a in 1:n_ages){
           for(y in 1:ny_proj){
-            pp_proj_n_p_a_y_hat[p,a,y] = tmp_proj[p,a,y] * mean_selectivity_at_age[a];
+            pp_proj_n_p_a_y_hat[p,a,y] = tmp_proj[p,a,y];
           }
         }
       }
