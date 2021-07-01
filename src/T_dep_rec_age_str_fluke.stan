@@ -323,14 +323,14 @@ generated quantities{
       // project pop dy
       
       for(y in 1:ny_proj){
-
-        for(p in 1:np){
         
+        for(p in 1:np){
+          
           if(y==1){
             // initiate projection with fixed observation
             for(a in 1:n_ages){
-              pp_proj_n_p_a_y_hat[p,a,1] = proj_init[p,a]; 
-              tmp_proj[p,a, 1] = proj_init[p,a];
+              //      pp_proj_n_p_a_y_hat[p,a,1] = proj_init[p,a]; 
+              tmp_proj[p,a, 1] = proj_init[p,a] / mean_selectivity_at_age[a]; // transform into pre-selectivity units
             }
           } else { // add case for all other years
           
@@ -368,31 +368,39 @@ generated quantities{
         } // close year loop
       } // close patch loop -- end of pop dy
       
+      // apply selectivity to tmp_proj
+      for(p in 1:np){
+        for(a in 1:n_ages){
+          for(y in 1:ny_proj){
+            pp_proj_n_p_a_y_hat[p,a,y] = tmp_proj[p,a,y] * mean_selectivity_at_age[a];
+          }
+        }
+      }
       
       // simulate selectivity and sampling error
-      for(p in 1:np){
-        for(y in 1:ny_proj){
-          pp_theta = bernoulli_rng(theta); // not being used for anything right now
-          
-          // right now we're just missing the whole negative binomial process because I am not sure how it fits in with the multinomial
-          // since this is a calculation we can't just set pp_proj_n_p_a_y_hat equal to two things
-
-          if(sum(tmp_proj[p,1:n_ages,y]) > 0){
-          pp_proj_n_p_a_y_hat[p,1:n_ages,y] = multinomial_rng(to_vector(tmp_proj[p,1:n_ages,y]) / sum(to_vector(tmp_proj[p,1:n_ages,y])), 1000);
-          
-          } else {
-            for(a in 1:n_ages){
-                      pp_proj_n_p_a_y_hat[p,a,y] = 0;
-            }
-          }
-          // impose selectivity on pp_proj_n_p_a_y_hat so we can compare it to the data 
-          n_p_a_y_proj[p,1:n_ages,y] = to_array_1d(to_vector(pp_proj_n_p_a_y_hat[p,1:n_ages,y]) .* to_vector(mean_selectivity_at_age));
-          
-        } // close year loop
-        
-      } // close patch loop
-      
-      
+      // for(p in 1:np){
+        //   for(y in 1:ny_proj){
+          //     pp_theta = bernoulli_rng(theta); // not being used for anything right now
+          //     
+          //     // right now we're just missing the whole negative binomial process because I am not sure how it fits in with the multinomial
+          //     // since this is a calculation we can't just set pp_proj_n_p_a_y_hat equal to two things
+          // 
+          //     if(sum(tmp_proj[p,1:n_ages,y]) > 0){
+            //     pp_proj_n_p_a_y_hat[p,1:n_ages,y] = multinomial_rng(to_vector(tmp_proj[p,1:n_ages,y]) / sum(to_vector(tmp_proj[p,1:n_ages,y])), 1000);
+            //     
+            //     } else {
+              //       for(a in 1:n_ages){
+                //                 pp_proj_n_p_a_y_hat[p,a,y] = 0;
+                //       }
+                //     }
+                //     // impose selectivity on pp_proj_n_p_a_y_hat so we can compare it to the data 
+                //     n_p_a_y_proj[p,1:n_ages,y] = to_array_1d(to_vector(pp_proj_n_p_a_y_hat[p,1:n_ages,y]) .* to_vector(mean_selectivity_at_age));
+                //     
+                //   } // close year loop
+                //   
+                // } // close patch loop
+                
+                
 } // close generated quantities
 
 
