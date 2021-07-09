@@ -60,6 +60,7 @@ rawdat$age <- mean_age_from_length(rawdat$length)
 
 hist(rawdat$age)
 
+# get SUM ages in each patch for estimating age composition (n_p_a_y)
 agedat <- rawdat %>% 
   filter(year>=1972) %>% 
   mutate(age_floor = floor(age), # rounding up so we don't have age zero - should start at age 1
@@ -68,12 +69,18 @@ agedat <- rawdat %>%
   mutate(
     age_floor = min(age_floor, 15)  # this is estimating a small number of super old fish, up to 24 -- I'm reclassifying them as 15 for now based on the stock assessment, is that right?
   ) %>% 
-  group_by(year, age_floor, lat_floor, haulid) %>% 
-  summarise(prep_num_at_age =sum(number_at_length)) %>%  # aggregate numbers by age within each haul
   group_by(year, age_floor, lat_floor) %>% 
-  summarise(number_at_age = mean(prep_num_at_age)) %>% # average across all hauls in the band
-    ungroup() %>% 
-  mutate(number_at_age = as.integer(ceiling(number_at_age))) # convert from density to counts, rounding up so that any positive encounter is at least a 1 (the averages are almost all between 0 and 1 so this  is a big assumption) 
+  summarise(sum_at_age =sum(number_at_length))
+
+# get MEAN densities in each patch for estimating total abundance (dens_p_y)
+densdat <- rawdat %>% 
+  filter(year>=1972) %>% 
+  mutate(lat_floor=floor(lat)) %>% 
+  group_by(year, lat_floor, haulid) %>% 
+  mutate(haul_total = sum(number_at_length)) %>% # get the total number of fish in all ages
+  group_by(year, lat_floor) %>% 
+  summarise(mean_dens = mean(haul_total)) # mean number of fish/haul for that patch and year
+
 
 # visualize lat band sampling in fall 
 
@@ -95,6 +102,7 @@ expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # 
 # based on this, let's drop lat bands below 35 and the year 2016
 
 agedat %<>% filter(lat_floor>34, year<2016)
+densdat %<>% filter(lat_floor>34, year<2016)
 
 # check that this now means all bands are surveyed in all years 
 expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # get all possible band*year combos
@@ -159,11 +167,14 @@ sbtdat$sbt[is.na(sbtdat$sbt)] <- mean(sbtdat$sbt, na.rm = TRUE)
 
 sbt <- as.matrix(with(sbtdat, sparseMatrix(patch, year, x=sbt))) # visually inspect this to be sure there are no zeroes -- they occur early in the time-series and also in 2016, but the data trimming should have taken care of it
 
-# make population matrix
+# make population matrices
 
 # add indices
 agedat$patch <- as.integer(as.factor(agedat$lat_floor))
 agedat$year <- as.integer(as.factor(agedat$year)) 
+
+densdat$patch <- as.integer(as.factor(densdat$lat_floor))
+densdat$year <- as.integer(as.factor(densdat$year)) 
 
 # fill in matrix
 pop <- array(NA, dim = c(np, n_ages, ny)) 
@@ -171,8 +182,16 @@ for(p in 1:np){
   for(a in 1:n_ages){
     for(y in 1:ny){
       tmp <- agedat %>% filter(patch==p, age_floor==(a-1), year==y) # here's where we convert ages to be indexed starting at 1 not 0 for ease in Stan
-      pop[p,a,y] <- tmp$number_at_age
+      pop[p,a,y] <- tmp$sum_at_age
     }
+  }
+}
+
+dens <- array(NA, dim = c(np, ny)) 
+for(p in 1:np){
+  for(y in 1:ny){
+    tmp2 <- densdat %>% filter(patch==p, year==y)
+    dens[p,y] <- tmp2$mean_dens
   }
 }
 
@@ -193,6 +212,7 @@ age_data <- list(
   n_ages=n_ages,
   ny_train=years_train,
   n_p_a_y = pop[,,1:years_train], 
+  dens_p_y = dens[,1:years_train],
   proj_init = pop[,,(years_train+1)],
   ny_proj = years_proj,
   sst = sbt[, 1:years_train], # change these variable names sometime...
@@ -233,7 +253,7 @@ age_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), #
 #launch_shinystan(age_model_fit)
 check_divergences(age_model_fit)
 plot(age_model_fit)
- 
+
 # get estimate of true states / posterior predictive / forecast
 n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, n_p_a_y_hat[patch, age,year], n = 1000)
 
@@ -331,6 +351,30 @@ ggsave(gg_n_p_a_y_hat, filename=here("results","fluke_age_structure_model_predic
 ggsave(gg_pp_proj_n_p_a_y_hat, filename=here("results","fluke_age_structure_forecast.png"), scale=1.5, width=6, height=10)
 
 ```
+
+
+```{r summary}
+n_p_a_y_hat_summary <- n_p_a_y_hat %>% 
+  group_by(.draw) %>% 
+  mutate(meanval = mean(.value)) %>% # get mean at each draw position across all chains
+  ungroup() %>% 
+  group_by(patch, age, year) %>% 
+  summarise(
+    mean_n = mean(.value), 
+    median_n = median(.value),
+    lower_n = quantile(.value, 0.05),
+    upper_n = quantile(.value, 0.95)
+  )
+
+gg_abund_ind <- n_p_a_y_hat_summary %>% 
+  group_by(year) %>% 
+  mutate(sum_n = sum(mean_n)) %>% 
+  ungroup() %>% 
+  ggplot() + 
+  geom_line(aes(x=year, y=sum_n))
+
+```
+
 
 
 ## Fit one-patch model

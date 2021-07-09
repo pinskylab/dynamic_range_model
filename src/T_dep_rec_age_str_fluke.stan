@@ -18,7 +18,9 @@ data {
   
   int ny_proj; // number of years to forecast 
   
-  int n_p_a_y[np, n_ages, ny_train];
+  int n_p_a_y[np, n_ages, ny_train]; // SUM number of individuals in each age, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
+  
+  real dens_p_y[np, ny_train]; // MEAN density of individuals of any age in each haul; used for rescaling the abundance to fit to our data
   
   int proj_init[np, n_ages]; // data with which to initialize projection (one year after the end of n_p_a_y)
   
@@ -75,7 +77,8 @@ parameters{
   vector[ny_train-1] raw; // array of raw recruitment deviates, changed to one value per year
   
   //  real<lower = 1e-3> sigma_obs;
-  real<lower=0> phi_obs; // I thought it was possible for this parameter to be negtive, but at one point got this error: Exception: neg_binomial_2_lpmf: Precision parameter is -0.317205, but must be > 0!  (in 'model1ee6785925e9_stage_ar_model_adult_dispersal' at line 145)
+  //real<lower=0> phi_obs; // I thought it was possible for this parameter to be negtive, but at one point got this error: Exception: neg_binomial_2_lpmf: Precision parameter is -0.317205, but must be > 0!  (in 'model1ee6785925e9_stage_ar_model_adult_dispersal' at line 145)
+  real<lower=0> sigma_obs;
   
   real<lower = 0> p_length_50_sel; // length at 50% selectivity
   
@@ -117,7 +120,7 @@ transformed parameters{
   
   mean_selectivity_at_age = length_at_age_key * selectivity_at_bin; // calculate mean selectivity at age given variance in length at age
   
-//  print("mean selectivity at age is ",mean_selectivity_at_age); // check that counts are different for every year
+  //  print("mean selectivity at age is ",mean_selectivity_at_age); // check that counts are different for every year
   
   sigma_r = exp(log_sigma_r);
   
@@ -136,16 +139,16 @@ transformed parameters{
       }
       // TRIED BACKING INIT POP SIZE OUT FROM COUNT AT SEL_100, BUT IT CAUSED THIS ERROR:
       // Chain 1: Rejecting initial value:
-//Chain 1:   Error evaluating the log probability at the initial value.
-//Chain 1: Exception: multinomial_lpmf: Probabilities parameter is not a valid simplex. sum(Probabilities parameter) = -nan, but should be 1  (in 'modelb55735c34310_T_dep_rec_age_str_fluke' at line 272)
+      //Chain 1:   Error evaluating the log probability at the initial value.
+      //Chain 1: Exception: multinomial_lpmf: Probabilities parameter is not a valid simplex. sum(Probabilities parameter) = -nan, but should be 1  (in 'modelb55735c34310_T_dep_rec_age_str_fluke' at line 272)
       // else if(a>=sel_100){
-      //   n_p_a_y_hat[p,a,1] = n_p_a_y[p,a,1];
-      // }
-      // else{
-      //   // backing out pre-fully-selected pop sizes to kick off the model
-      //   n_p_a_y_hat[p,a,1] = n_p_a_y[p,sel_100,1] / pow(1-z, (sel_100-a)); 
-      // }
-  //    print("initial pop size for patch ",p," and age ",a," is ",n_p_a_y_hat[p,a,1]);
+        //   n_p_a_y_hat[p,a,1] = n_p_a_y[p,a,1];
+        // }
+        // else{
+          //   // backing out pre-fully-selected pop sizes to kick off the model
+          //   n_p_a_y_hat[p,a,1] = n_p_a_y[p,sel_100,1] / pow(1-z, (sel_100-a)); 
+          // }
+          //    print("initial pop size for patch ",p," and age ",a," is ",n_p_a_y_hat[p,a,1]);
     } // close ages
   } // close patches
   
@@ -232,8 +235,8 @@ model {
   
   alpha ~ normal(0,.25); // autocorrelation prior
   
-  phi_obs ~ normal(0.75, 0.25); // from https://mc-stan.org/docs/2_20/functions-reference/nbalt.html  phi = mu^2 / (sigma^2-mu); 
-  // should we be modeling sigma_obs instead?
+  //  phi_obs ~ normal(0.75, 0.25); // from https://mc-stan.org/docs/2_20/functions-reference/nbalt.html  phi = mu^2 / (sigma^2-mu); 
+  sigma_obs ~ normal(1000, 10000); // think more about whether these numbers are reasonable
   
   p_length_50_sel ~ normal(length_50_sel_guess/loo, .05);
   
@@ -257,7 +260,6 @@ model {
         // if(sum(n_a_y[sel_100:n_ages,y]) > 0) { // this was still passing some vectors of all zeros to the multinomial, so I replaced  it with:
         // QUESTION: before we were conditioning on the sum true counts being >0. but if the sum *modeled* counts aren't >0, the multinomial doesn't work... so is it OK to condition on those instead?
         
-        
         for(p in 1:np){
           //   if(sum(n_a_y_transform[1:n_ages]) > 0 && sum(n_a_y[sel_100:n_ages,y]) > 0) {
             
@@ -274,7 +276,8 @@ model {
               // FLAG -- is this the right way to recalibrate the magnitude of n_a_y by the absolute scale?
               // n_p_a_y[p,1:ns,y] ~ multinomial(to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage);
               n_p_a_y[p,1:n_ages,y] ~ multinomial((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age) / sum(to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age));
-              sum(n_p_a_y[p,1:n_ages,y]) ~ neg_binomial_2(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)) + 1e-3, phi_obs); 
+              //  sum(n_p_a_y[p,1:n_ages,y]) ~ neg_binomial_2(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)) + 1e-3, phi_obs); 
+              dens_p_y[p,y] ~ lognormal(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)), sigma_obs); 
               
               1 ~ bernoulli(theta);
               
@@ -373,7 +376,7 @@ generated quantities{
               
             } // close else for reproductive age group
             
-            print("tmp_proj for patch ",p,", year ",y,", age ",a,", is: ",tmp_proj[p,a,y]); 
+            //     print("tmp_proj for patch ",p,", year ",y,", age ",a,", is: ",tmp_proj[p,a,y]); 
             
           } // close age loop
           } // close else for all years except the initial one 
