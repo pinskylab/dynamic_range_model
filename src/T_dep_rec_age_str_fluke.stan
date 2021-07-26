@@ -52,6 +52,8 @@ data {
   
   int age_at_maturity;
   
+  vector[np] patcharea;
+  
   
 }
 
@@ -88,6 +90,7 @@ parameters{
   real theta_threshold; // actual value to trigger positive encounters
   
   real<lower=0, upper=1> d; // dispersal fraction 
+  
 }
 
 transformed parameters{
@@ -103,6 +106,8 @@ transformed parameters{
   real mean_recruits;
   
   real n_p_a_y_hat [np, n_ages,ny_train]; // array of numbers at patch, stage, and year 
+  
+  real dens_p_y_hat [np, ny_train]; // for tracking sum density 
   
   vector[ny_train-1] rec_dev; // array of realized recruitment deviates, also now only 1/yr (it's a good or bad year everywhere)
   
@@ -213,6 +218,11 @@ transformed parameters{
     
   } // close year 2+ loop
   
+  for(p in 1:np){
+    for(y in 1:ny_train){
+      dens_p_y_hat[p,y] = sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age));
+    }
+  }
   
 } // close transformed parameters block
 
@@ -277,7 +287,7 @@ model {
               // n_p_a_y[p,1:ns,y] ~ multinomial(to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage);
               n_p_a_y[p,1:n_ages,y] ~ multinomial((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age) / sum(to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age));
               //  sum(n_p_a_y[p,1:n_ages,y]) ~ neg_binomial_2(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)) + 1e-3, phi_obs); 
-              dens_p_y[p,y] ~ lognormal(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)), sigma_obs); 
+              (dens_p_y[p,y] * patcharea[p]) ~ lognormal(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)), sigma_obs); 
               
               1 ~ bernoulli(theta);
               
@@ -297,6 +307,8 @@ model {
 generated quantities{
   
   real pp_proj_n_p_a_y_hat[np,n_ages, ny_proj];
+  
+  real pp_proj_dens_p_y_hat[np, ny_proj];
   
   real tmp_proj[np,n_ages, ny_proj];
   
@@ -391,6 +403,12 @@ generated quantities{
           }
         }
       }
+      
+  for(p in 1:np){
+    for(y in 1:ny_proj){
+      pp_proj_dens_p_y_hat[p,y] = sum((to_vector(pp_proj_n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age));
+    }
+  }
       
       // simulate selectivity and sampling error
       // for(p in 1:np){

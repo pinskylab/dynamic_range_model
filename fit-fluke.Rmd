@@ -21,6 +21,7 @@ library(Matrix)
 library(ggridges)
 library(rstanarm)
 library(spasm)
+library(geosphere)
 #install from
 # devtools::install_github("danovando/spasm")
 #source(here("functions","generate-length-to-age.R")) # from SPASM by D Ovando
@@ -41,6 +42,7 @@ Page 58 of SAW 66: In the current work, the NEFSC trawl survey data for 1976-201
 AF note: not sure how max age should be used
 
 ```{r length-age}
+# prep length and age data  
 Loo = 83.6
 k = 0.14
 
@@ -115,12 +117,29 @@ expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # 
   ggplot(aes(x=year, y=lat_floor)) +
   geom_tile(aes(fill=surveyed)) +
   scale_y_continuous(breaks=seq(min(agedat$lat_floor), max(agedat$lat_floor, 1)))
+
 ```
 
 
 ## Prep for model
 
 ```{r modelprep}
+# prep patch area 
+patchdat <- rawdat %>% 
+  select(lat, lon) %>%
+  distinct() %>%
+  mutate(lat_floor = floor(lat)) %>% 
+  group_by(lat_floor) %>% 
+  summarise(max_lon=max(lon),
+         min_lon=min(lon)) %>% 
+  rowwise() %>% 
+  mutate(lon_dist = distGeo(p1=c(max_lon, lat_floor+0.5), p2=c(min_lon, lat_floor+0.5))/1000, # get distance between the furthest longitudes in km, at the midpoint of the lat band 
+         patch_area_km2 = lon_dist * 111) %>%  # 1 degree latitude = 111 km 
+  select(lat_floor, patch_area_km2) %>% 
+  filter(lat_floor %in% agedat$lat_floor) %>% 
+  ungroup() %>% 
+  mutate(patch = as.integer(as.factor(lat_floor)))
+  
 ## get time dimension
 years <- sort(unique(agedat$year)) 
 ny <- length(years)
@@ -206,7 +225,7 @@ age_at_maturity = 2
 
 ## fit a model
 
-```{r fit-model, echo=FALSE, message=FALSE}
+```{r fit-model, echo=FALSE, message=FALSE, results="hide"}
 age_data <- list(
   np=np,
   n_ages=n_ages,
@@ -227,7 +246,8 @@ age_data <- list(
   age_sel = 0,
   bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
   sel_100 = 3, # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
-  age_at_maturity = age_at_maturity
+  age_at_maturity = age_at_maturity,
+  patcharea = patchdat$patch_area_km2
 )
 warmups <- 2000
 total_iterations <- 4000
@@ -256,11 +276,11 @@ plot(age_model_fit)
 
 # get estimate of true states / posterior predictive / forecast
 n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, n_p_a_y_hat[patch, age,year], n = 1000)
+dens_p_y_hat <-  tidybayes::gather_draws(age_model_fit, dens_p_y_hat[patch,year], n = 1000)
 
 # pp_n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, pp_n_p_a_y_hat[patch, age,year], n = 1000) # add this back into the model!
 
 pp_proj_n_p_a_y_hat <-  tidybayes::gather_draws(age_model_fit, pp_proj_n_p_a_y_hat[patch, age,year], n = 1000)
-
 
 # get real data
 n_p_a_y <- pop[,,1:years_train] %>% 
@@ -278,12 +298,13 @@ sel <- sel_at_age %>%
   group_by(age) %>% 
   summarise(sel = mean(.value))
 
-gg_n_p_a_y_hat <- n_p_a_y_hat %>% 
-  left_join(sel, by = "age") %>% 
-  ggplot() +
-  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
-  geom_point(data = n_p_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 
-  facet_grid(age~patch, scales="free_y") + 
+# plot trends in abundance by patch (all ages)
+gg_dens_p_y_hat <- dens_p_y_hat %>% 
+    left_join(patchdat, by="patch") %>% 
+ggplot() +
+  stat_lineribbon(aes(x = year, y = .value / patch_area_km2),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = densdat, aes(x=year, y=mean_dens), size = 2,alpha = 0.5) + 
+  facet_wrap(~patch, scales="free_y") + 
   scale_fill_brewer() +
   labs(title="model predictions")
 
