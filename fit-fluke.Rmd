@@ -22,6 +22,7 @@ library(ggridges)
 library(rstanarm)
 library(spasm)
 library(geosphere)
+rstan_options(javascript=FALSE)
 #install from
 # devtools::install_github("danovando/spasm")
 #source(here("functions","generate-length-to-age.R")) # from SPASM by D Ovando
@@ -32,6 +33,8 @@ Note that we are now pulling in the raw length composition data, and it is for t
 
 ```{r data}
 rawdat <- read_csv(here("processed-data","fluke_catch_at_length_fall.csv"))
+
+max_lat_observed <- 42
 ```
 
 ## Convert to ages 
@@ -46,13 +49,17 @@ AF note: not sure how max age should be used
 Loo = 83.6
 k = 0.14
 
-# Dan, can you confirm I did these right? 
+
 mean_age_from_length <- function(length){
   age = log(1-length/Loo)/-k 
   return(age)
 }
 
-# NOTE that I think this will produce zero length from zero age which we know is wrong. we need to add in a buffer for size at age 0
+# LOOK AT VON BERT TO ADD SIZE AT T0 TO THIS EQUATION # IGNORE
+# REPLACE WITH LENGTH_AT_AGE_KEY_DAT 
+# MULTIPLY NUMBER OF FISH IN LENGTH BIN BY THE VECTOR OF PROPORTIONS OF AGES AT THAT LENGTH
+# IF MAX AGE = 10
+# 
 mean_length_from_age <- function(age_vector){
   length_vector = (1-exp(-k*age_vector))*Loo
   return(length_vector)
@@ -103,8 +110,9 @@ expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # 
   scale_y_continuous(breaks=seq(min(agedat$lat_floor), max(agedat$lat_floor, 1)))
 # based on this, let's drop lat bands below 35 and the year 2016
 
-agedat %<>% filter(lat_floor>34, year<2016)
-densdat %<>% filter(lat_floor>34, year<2016)
+#FLAG
+agedat %<>% filter(lat_floor %in% seq(36,40,1), year<2016)
+densdat %<>% filter(lat_floor %in% seq(36,40,1), year<2016)
 
 # check that this now means all bands are surveyed in all years 
 expand.grid(year=unique(agedat$year), lat_floor=unique(agedat$lat_floor)) %>% # get all possible band*year combos
@@ -154,6 +162,7 @@ n_ages <- length(ages)
 lbins <- sort(unique(rawdat$length))
 n_lbins <- length(lbins) 
 
+
 # make length-at-age key 
 length_at_age_key_dat <- spasm::generate_length_at_age_key(
   min_age = min(ages), 
@@ -165,6 +174,7 @@ length_at_age_key_dat <- spasm::generate_length_at_age_key(
   time_step = 1,
   linf_buffer = 1 # doing this just to shoehorn it into the right size for the model; can make it bigger if we need to
 )
+
 mean_length_at_age <- map(ages,mean_length_from_age) %>% unlist()
 
 # convert to matrix 
@@ -210,7 +220,7 @@ dens <- array(NA, dim = c(np, ny))
 for(p in 1:np){
   for(y in 1:ny){
     tmp2 <- densdat %>% filter(patch==p, year==y)
-    dens[p,y] <- tmp2$mean_dens
+    dens[p,y] <- tmp2$mean_dens * patchdat$patch_area_km2[p]
   }
 }
 
@@ -231,7 +241,7 @@ age_data <- list(
   n_ages=n_ages,
   ny_train=years_train,
   n_p_a_y = pop[,,1:years_train], 
-  dens_p_y = dens[,1:years_train],
+  abund_p_y = dens[,1:years_train],
   proj_init = pop[,,(years_train+1)],
   ny_proj = years_proj,
   sst = sbt[, 1:years_train], # change these variable names sometime...
@@ -257,9 +267,9 @@ n_cores <- 4
 age_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), # check that it's the right model!
                       data = age_data,
                       chains = 1,
-                      warmup = warmups,
-                      iter = total_iterations,
-                      cores = 4,
+                      warmup = 1000,
+                      iter = 2000,
+                      cores = 1,
                       refresh = 250,
                       control = list(max_treedepth = max_treedepth,
                                      adapt_delta = 0.95)
@@ -302,16 +312,55 @@ sel <- sel_at_age %>%
 gg_dens_p_y_hat <- dens_p_y_hat %>% 
     left_join(patchdat, by="patch") %>% 
 ggplot() +
-  stat_lineribbon(aes(x = year, y = .value / patch_area_km2),.width = c(.99, .95, .8, .5), color = "red") +
+  stat_lineribbon(aes(x = year, y = .value),.width = c(.99, .95, .8, .5), color = "red") + # CHECK SCALING
   geom_point(data = densdat, aes(x=year, y=mean_dens), size = 2,alpha = 0.5) + 
   facet_wrap(~patch, scales="free_y") + 
   scale_fill_brewer() +
   labs(title="model predictions")
 
+gg_dens_check <- dens_p_y_hat %>% 
+    left_join(patchdat, by="patch") %>% 
+ggplot() +
+  stat_lineribbon(aes(x = year, y = .value/max(.value)),.width = c(.99, .95, .8, .5), color = "red") + # CHECK SCALING
+  geom_point(data = densdat, aes(x=year, y=mean_dens/max(mean_dens)), size = 2,alpha = 0.5) + 
+  facet_wrap(~patch, scales="free_y") + 
+  scale_fill_brewer() +
+  labs(title="model predictions")
+
+n_p_a_y_hat_prop <- n_p_a_y_hat %>% 
+      left_join(sel, by = "age") %>% 
+mutate(.valuesel = .value*sel) %>% 
+  group_by(patch, year, .iteration) %>% 
+  mutate(prop = .valuesel / sum(.valuesel)) %>% 
+  ungroup()
+
+tmp3 <- n_p_a_y_hat_prop %>% 
+  filter(patch==3) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = age, y = prop),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y %>% group_by(patch, year) %>% mutate(prop = value / sum(value)) %>% ungroup() %>% filter(patch==3), aes(x=age, y=prop), size = 2,alpha = 0.5) + 
+  facet_wrap(~year) 
+
+tmp5 <- n_p_a_y_hat_prop %>% 
+  filter(patch==5) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = age, y = prop),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y %>% group_by(patch, year) %>% mutate(prop = value / sum(value)) %>% ungroup() %>% filter(patch==5), aes(x=age, y=prop), size = 2,alpha = 0.5) + 
+  facet_wrap(~year) 
 
 gg_n_p_a_y_hat_ex <- n_p_a_y_hat %>% 
   left_join(sel, by = "age") %>% 
-  filter(patch==6) %>% 
+  filter(patch==3) %>% 
+  ggplot() +
+  stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
+  geom_point(data = n_p_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 
+  facet_wrap(~age, scales="free_y", ncol=8) + 
+  scale_fill_brewer() +
+  labs(title="model predictions", x="year", y="count")
+
+gg_n_p_a_y_hat_ex <- n_p_a_y_hat %>% 
+  left_join(sel, by = "age") %>% 
+  filter(patch==3) %>% 
   ggplot() +
   stat_lineribbon(aes(x = year, y = .value * sel, group=age),.width = c(.99, .95, .8, .5), color = "red") +
   geom_point(data = n_p_a_y, aes(x=year, y=value, group=age), size = 2,alpha = 0.5) + 

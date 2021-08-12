@@ -20,7 +20,7 @@ data {
   
   int n_p_a_y[np, n_ages, ny_train]; // SUM number of individuals in each age, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
   
-  real dens_p_y[np, ny_train]; // MEAN density of individuals of any age in each haul; used for rescaling the abundance to fit to our data
+  real abund_p_y[np, ny_train]; // MEAN density of individuals of any age in each haul; used for rescaling the abundance to fit to our data
   
   int proj_init[np, n_ages]; // data with which to initialize projection (one year after the end of n_p_a_y)
   
@@ -70,7 +70,7 @@ parameters{
   
   real log_sigma_r; // sigma recruits
   
-  real<lower = -1, upper = 1> alpha; // autocorrelation term
+  real<lower = -1, upper = 1> alpha; // autocorrelation term 
   
   // real  log_mean_recruits; // log mean recruits per patch, changed to one value for all space/time
   
@@ -89,7 +89,7 @@ parameters{
   // CURRENTLY NOT REALLY USING THIS, NEED TO INCORPORATE OR DELETE.
   real theta_threshold; // actual value to trigger positive encounters
   
-  real<lower=0, upper=1> d; // dispersal fraction 
+  real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
   
 }
 
@@ -97,7 +97,7 @@ transformed parameters{
   
   real T_adjust[np, ny_train]; // tuning parameter for SST suitability in each patch*year
   
-  real<lower=0> sigma_r;
+  real sigma_r;
   
   real length_50_sel;
   
@@ -133,11 +133,18 @@ transformed parameters{
   
   //print("mean recruits is ",mean_recruits);
   
-  // fill in year 1 of n_p_a_y_hat 
+  // calculate temperature-dependence correction factor for each patch and year depending on SST
+  for(p in 1:np){
+    for(y in 1:ny_train){
+      T_adjust[p,y] = T_dep(sst[p,y], Topt, width);  
+    } // close years
+  } // close patches
+  
+  // fill in year 1 of n_p_a_y_hat, initialized with mean_recruits 
   for(p in 1:np){
     for(a in 1:n_ages){
       if(a==1){
-        n_p_a_y_hat[p,a,1] = mean_recruits; // initialize age 0 with mean recruitment in every patch
+        n_p_a_y_hat[p,a,1] = mean_recruits * T_adjust[p,1]; // initialize age 0 with mean recruitment in every patch
       }
       else{
         n_p_a_y_hat[p,a,1] = n_p_a_y_hat[p,a-1,1] * (1-z); // initialize population with mean recruitment propogated through age classes with mortality
@@ -157,12 +164,6 @@ transformed parameters{
     } // close ages
   } // close patches
   
-  // calculate temperature-dependence correction factor for each patch and year depending on SST
-  for(p in 1:np){
-    for(y in 1:ny_train){
-      T_adjust[p,y] = T_dep(sst[p,y], Topt, width);  
-    } // close years
-  } // close patches
   
   // calculate recruitment deviates every year (not patch-specific)
   for (y in 2:ny_train){
@@ -181,7 +182,14 @@ transformed parameters{
       
       // density-independent, temperature-dependent recruitment of age 1
       n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1];
-      
+      // why estimate raw and sigma_r? we want to estimate process error
+      // if we got rid of sigma_r, we would be saying that raw could be anything
+      // that means raw could pick any value, and it would pick deviates to perfectly match abundance index
+      // sigma_r scales the amount of process error that we say is possible
+      // letting it go to infinity means the model will always fit the data perfectly 
+      // raw is the realized process error 
+      // exp(rec_dev[y-1] - pow(sigma_r,2)/2) = random variable with mean 0 and SD sigma_r
+      // allows us to have a different recruitment deviation every year even though sigma_r is constant 
       
       // pop dy for non-reproductive ages 
       if(age_at_maturity > 1){ // confirm that there are non-reproductive age classes above 1
@@ -208,7 +216,7 @@ transformed parameters{
         } // close highest patch
         
         else{
-          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * (1-z) * 2*(1-d) + n_p_a_y_hat[p-1, a-1, y-1] * (1-z) * d + n_p_a_y_hat[p+1, a-1, y-1] * (1-z) * d;
+          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * (1-z) * (1-2*d) + n_p_a_y_hat[p-1, a-1, y-1] * (1-z) * d + n_p_a_y_hat[p+1, a-1, y-1] * (1-z) * d;
           
         } // close if/else for all other patches
         
@@ -221,8 +229,10 @@ transformed parameters{
   for(p in 1:np){
     for(y in 1:ny_train){
       dens_p_y_hat[p,y] = sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age));
+
     }
   }
+
   
 } // close transformed parameters block
 
@@ -230,7 +240,7 @@ model {
   
   theta ~ uniform(0, 1); // Bernoulli probability of encounter
   
-  d ~ normal(0.5, 0.25); // dispersal rate as a proportion of total population size within the patch
+  d ~ normal(0.1, 0.1); // dispersal rate as a proportion of total population size within the patch
   
   // RIGHT NOW THIS ISN'T DOING ANYTHING! FIX THAT
   theta_threshold ~ normal(50, 100); // number of total individuals for which encounters are positive
@@ -275,7 +285,7 @@ model {
             
             // this should work just with the n_p_a_y clause, but I get this error:
             // Exception: multinomial_lpmf: Probabilities parameter is not a valid simplex. sum(Probabilities parameter) = -nan, but should be 1  (in 'modelea1f73d5b5cc_T_dep_rec_age_str_fluke' at line 261)
-            if(sum(n_p_a_y[p,sel_100:n_ages,y]) > 0 && sum(n_p_a_y_hat[p,1:n_ages,y]) > 0) {
+            if(sum(n_p_a_y[p,sel_100:n_ages,y]) > 0) {
               
               // multinomial to estimate relative abundance of stages
               
@@ -287,7 +297,9 @@ model {
               // n_p_a_y[p,1:ns,y] ~ multinomial(to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage);
               n_p_a_y[p,1:n_ages,y] ~ multinomial((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age) / sum(to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age));
               //  sum(n_p_a_y[p,1:n_ages,y]) ~ neg_binomial_2(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)) + 1e-3, phi_obs); 
-              (dens_p_y[p,y] * patcharea[p]) ~ lognormal(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)), sigma_obs); 
+              //abund_p_y[p,y] ~ lognormal(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)), sigma_obs); 
+              abund_p_y[p,y] ~ lognormal(dens_p_y_hat[p,y], sigma_obs); 
+
               
               1 ~ bernoulli(theta);
               
