@@ -256,7 +256,7 @@ model {
   alpha ~ normal(0,.25); // autocorrelation prior
   
   //  phi_obs ~ normal(0.75, 0.25); // from https://mc-stan.org/docs/2_20/functions-reference/nbalt.html  phi = mu^2 / (sigma^2-mu); 
-  sigma_obs ~ normal(1000, 10000); // think more about whether these numbers are reasonable
+  sigma_obs ~ normal(.1, 2); // think more about whether these numbers are reasonable
   
   p_length_50_sel ~ normal(length_50_sel_guess/loo, .05);
   
@@ -285,7 +285,7 @@ model {
             
             // this should work just with the n_p_a_y clause, but I get this error:
             // Exception: multinomial_lpmf: Probabilities parameter is not a valid simplex. sum(Probabilities parameter) = -nan, but should be 1  (in 'modelea1f73d5b5cc_T_dep_rec_age_str_fluke' at line 261)
-            if(sum(n_p_a_y[p,sel_100:n_ages,y]) > 0) {
+            if((abund_p_y[p,y]) > 0) {
               
               // multinomial to estimate relative abundance of stages
               
@@ -295,10 +295,10 @@ model {
               //   sum(n_a_y[1:n_ages,y]) ~ neg_binomial_2(sum(n_a_y_transform[1:n_ages]) + 1e-3, phi_obs); 
               // FLAG -- is this the right way to recalibrate the magnitude of n_a_y by the absolute scale?
               // n_p_a_y[p,1:ns,y] ~ multinomial(to_vector(n_p_a_y_hat[p,1:ns,y]) .* sel_at_stage);
-              n_p_a_y[p,1:n_ages,y] ~ multinomial((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age) / sum(to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age));
+              (n_p_a_y[p,1:n_ages,y]) ~ multinomial(softmax(to_vector(n_p_a_y_hat[p,1:n_ages,y]) .*  mean_selectivity_at_age));
               //  sum(n_p_a_y[p,1:n_ages,y]) ~ neg_binomial_2(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)) + 1e-3, phi_obs); 
               //abund_p_y[p,y] ~ lognormal(sum((to_vector(n_p_a_y_hat[p,1:n_ages,y]) .* mean_selectivity_at_age)), sigma_obs); 
-              abund_p_y[p,y] ~ lognormal(dens_p_y_hat[p,y], sigma_obs); 
+              log(abund_p_y[p,y]) ~ normal(log(dens_p_y_hat[p,y] + 1e-6), sigma_obs); 
 
               
               1 ~ bernoulli(theta);

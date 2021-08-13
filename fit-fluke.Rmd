@@ -72,7 +72,7 @@ hist(rawdat$age)
 # get SUM ages in each patch for estimating age composition (n_p_a_y)
 agedat <- rawdat %>% 
   filter(year>=1972) %>% 
-  mutate(age_floor = floor(age), # rounding up so we don't have age zero - should start at age 1
+  mutate(age_floor = round(age) - 1, # rounding up so we don't have age zero - should start at age 1
          lat_floor = floor(lat)) %>% 
   rowwise() %>% 
   mutate(
@@ -217,10 +217,15 @@ for(p in 1:np){
 }
 
 dens <- array(NA, dim = c(np, ny)) 
+
+densdat <-  densdat %>% 
+  left_join(patchdat) %>% 
+  mutate(mean_dens = mean_dens * patch_area_km2)
+
 for(p in 1:np){
   for(y in 1:ny){
     tmp2 <- densdat %>% filter(patch==p, year==y)
-    dens[p,y] <- tmp2$mean_dens * patchdat$patch_area_km2[p]
+    dens[p,y] <- tmp2$mean_dens
   }
 }
 
@@ -240,7 +245,7 @@ age_data <- list(
   np=np,
   n_ages=n_ages,
   ny_train=years_train,
-  n_p_a_y = pop[,,1:years_train], 
+  n_p_a_y = round(pop[,,1:years_train] / 10), 
   abund_p_y = dens[,1:years_train],
   proj_init = pop[,,(years_train+1)],
   ny_proj = years_proj,
@@ -266,10 +271,10 @@ n_chains <-  4
 n_cores <- 4 
 age_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), # check that it's the right model!
                       data = age_data,
-                      chains = 1,
-                      warmup = 1000,
-                      iter = 2000,
-                      cores = 1,
+                      chains = 4,
+                      warmup = 5000,
+                      iter = 10000,
+                      cores = 4,
                       refresh = 250,
                       control = list(max_treedepth = max_treedepth,
                                      adapt_delta = 0.95)
@@ -280,7 +285,7 @@ age_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_fluke.stan"), #
 ## evaluate the model
 
 ```{r}
-#launch_shinystan(age_model_fit)
+  launch_shinystan(age_model_fit)
 check_divergences(age_model_fit)
 plot(age_model_fit)
 
@@ -310,10 +315,11 @@ sel <- sel_at_age %>%
 
 # plot trends in abundance by patch (all ages)
 gg_dens_p_y_hat <- dens_p_y_hat %>% 
+  # filter(patch == 5, year %in% 1:years_train) %>% 
     left_join(patchdat, by="patch") %>% 
 ggplot() +
-  stat_lineribbon(aes(x = year, y = .value),.width = c(.99, .95, .8, .5), color = "red") + # CHECK SCALING
-  geom_point(data = densdat, aes(x=year, y=mean_dens), size = 2,alpha = 0.5) + 
+  stat_lineribbon(aes(x = year, y = (.value)),.width = c(.99, .95, .8, .5), color = "red") + # CHECK SCALING
+  geom_point(data = densdat, aes(x=year, y= (mean_dens)), size = 2,alpha = 0.5) +
   facet_wrap(~patch, scales="free_y") + 
   scale_fill_brewer() +
   labs(title="model predictions")
@@ -334,12 +340,32 @@ mutate(.valuesel = .value*sel) %>%
   mutate(prop = .valuesel / sum(.valuesel)) %>% 
   ungroup()
 
-tmp3 <- n_p_a_y_hat_prop %>% 
-  filter(patch==3) %>% 
+tmp3 <- n_p_a_y_hat_prop %>%
+  filter(patch == 5, age < 10) %>%
   ggplot() +
-  stat_lineribbon(aes(x = age, y = prop),.width = c(.99, .95, .8, .5), color = "red") +
-  geom_point(data = n_p_a_y %>% group_by(patch, year) %>% mutate(prop = value / sum(value)) %>% ungroup() %>% filter(patch==3), aes(x=age, y=prop), size = 2,alpha = 0.5) + 
-  facet_wrap(~year) 
+  stat_lineribbon(aes(x = age, y = prop),
+                  .width = c(.99, .95, .8, .5),
+                  color = "red") +
+  geom_point(
+    data = n_p_a_y %>% group_by(patch, year) %>% mutate(prop = value / sum(value)) %>% ungroup() %>% filter(patch ==
+                                                                                                              5),
+    aes(x = age, y = prop),
+    size = 2,
+    alpha = 0.5
+  ) +
+  facet_wrap( ~ year) 
+
+n_p_a_y_hat_prop %>%
+  # left_join(sel, by = 'age') %>% 
+  group_by(year, age, patch) %>%
+  summarise(n = mean(.value * sel)) %>% 
+  group_by(year, patch) %>% 
+  mutate(prop = n / sum(n)) %>% 
+  ungroup() %>% 
+  filter(age < 10, patch == 5) %>% 
+  ggplot(aes(age, y = year, group = year, height = prop)) + 
+  geom_density_ridges(stat = "identity") +
+  facet_wrap(~patch)
 
 tmp5 <- n_p_a_y_hat_prop %>% 
   filter(patch==5) %>% 
@@ -347,6 +373,29 @@ tmp5 <- n_p_a_y_hat_prop %>%
   stat_lineribbon(aes(x = age, y = prop),.width = c(.99, .95, .8, .5), color = "red") +
   geom_point(data = n_p_a_y %>% group_by(patch, year) %>% mutate(prop = value / sum(value)) %>% ungroup() %>% filter(patch==5), aes(x=age, y=prop), size = 2,alpha = 0.5) + 
   facet_wrap(~year) 
+
+a = n_p_a_y %>% 
+  group_by(patch, year) %>% 
+  mutate(prop = value / sum(value)) %>% 
+  ungroup() %>% 
+  filter(age < 10, patch == 5) %>%  
+  ggplot(aes(x = age, y = year, group = year, height = prop)) + 
+  geom_density_ridges(stat = "identity") + 
+  facet_wrap(~patch)
+
+rawdat %>% 
+  mutate(lat_floor = floor(lat)) %>% 
+  group_by(year, length,lat_floor) %>% 
+  summarise(n = sum(number_at_length)) %>% 
+  group_by(lat_floor, year) %>% 
+  mutate(prop = n / sum(n)) %>% 
+  ungroup() %>% 
+  filter(between(lat_floor, 37, 41), year > 2000) %>% 
+  ggplot(aes(x = length, y = year, group = year, height = prop)) + 
+  geom_density_ridges(stat = "identity") + 
+  facet_wrap(~lat_floor)
+
+
 
 gg_n_p_a_y_hat_ex <- n_p_a_y_hat %>% 
   left_join(sel, by = "age") %>% 
