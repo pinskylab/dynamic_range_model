@@ -92,7 +92,7 @@ patchdat <- dat %>%
   ungroup() %>% 
   mutate(patch = as.integer(as.factor(lat_floor)))
 
-dat_train_sbt <- dat %>%   # make temperature matrix 
+dat_train_sbt <- dat %>%   
   mutate(lat_floor = floor(lat)) %>% 
   group_by(lat_floor, year) %>% 
   summarise(sbt = mean(btemp, na.rm=TRUE)) %>% 
@@ -101,13 +101,14 @@ dat_train_sbt <- dat %>%   # make temperature matrix
   mutate(patch = as.integer(as.factor(lat_floor)))
 
 # set fixed parameters from stock assessment
-Loo = 83.6
+loo = 83.6
 k = 0.14
-# mortality
 m = 0.25
 f = 0.334
 z = exp(-m-f)
 age_at_maturity = 2
+l0=0
+cv=0.2 # guess
 
 # get time dimension
 years <- sort(unique(dat_train_lengths$year)) 
@@ -120,21 +121,10 @@ np = length(patches)
 lbins <- sort(unique(dat_train_lengths$length))
 n_lbins <- length(lbins) 
 
-# make length-at-age key 
-length_at_age_key_dat <- spasm::generate_length_at_age_key(
-  min_age = min(ages), 
-  max_age = max(ages), 
-  cv = 0.2, # "magic number" - revisit this sometime (use LIME as a guide?)
-  k = k, 
-  linf = Loo,
-  t0 = 0, # is this right?
-  time_step = 1,
-  linf_buffer = 1 # doing this just to shoehorn it into the right size for the model; can make it bigger if we need to
-)
-
 # now that years are defined above, convert them into indices in the datasets
 dat_train_dens$year = as.integer(as.factor(dat_train_dens$year))
 dat_train_lengths$year = as.integer(as.factor(dat_train_lengths$year))
+dat_train_sbt$year= as.integer(as.factor(dat_train_sbt$year))
 
 # make matrices/arrays from dfs
 len <- array(NA, dim = c(np, n_lbins, ny)) 
@@ -157,5 +147,51 @@ for(p in 1:np){
   }
 }
 
+sbt <- array(NA, dim=c(np,ny))
+for(p in 1:np){
+  for(y in 1:ny){
+    tmp3 <- dat_train_sbt %>% filter(patch==p, year==y) 
+    sbt[p,y] <- tmp3$sbt
+  }
+}
+######
+# fit model
+######
 
+stan_data <- list(
+  np=np,
+  n_ages=n_ages,
+  ny_train=ny,
+  n_lbins=n_lbins,
+  n_p_l_y = len,
+  abund_p_y = dens,
+  sbt = sbt,
+  z=z,
+  k=k,
+  loo=loo,
+  l0=l0,
+  cv=cv,
+  length_50_sel_guess=20, # THIS IS A RANDOM GUESS, I can't find help in the stock assessment
+  n_lbins = n_lbins, 
+  age_sel = 0,
+  bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
+  sel_100 = 3, # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
+  age_at_maturity = age_at_maturity,
+  patcharea = patchdat$patch_area_km2
+)
 
+warmups <- 2000
+total_iterations <- 4000
+max_treedepth <-  12
+n_chains <-  4
+n_cores <- 4 
+stan_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_summer_flounder.stan"), # check that it's the right model!
+                      data = age_data,
+                      chains = 4,
+                      warmup = 5000,
+                      iter = 10000,
+                      cores = 4,
+                      refresh = 250,
+                      control = list(max_treedepth = max_treedepth,
+                                     adapt_delta = 0.95)
+)

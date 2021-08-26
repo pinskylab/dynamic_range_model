@@ -51,13 +51,9 @@ data {
   
   real abund_p_y[np, ny_train]; // MEAN density of individuals of any age in each haul; used for rescaling the abundance to fit to our data
   
-  int proj_init[np, n_ages]; // data with which to initialize projection (one year after the end of n_p_a_y)
-  
   // environmental data 
   
   real sbt[np, ny_train]; // temperature data for training
-  
-  real sbt_proj[np, ny_proj]; // temperature data for testing 
   
   // fish data
   
