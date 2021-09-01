@@ -11,6 +11,7 @@ functions {
 data {
   
   // survey data 
+  vector[3] tester;
   
   int n_ages; // number of ages
   
@@ -60,6 +61,7 @@ data {
   
   vector[np] patcharea;
   
+  int<lower = 0, upper = 1> do_dirichlet;
   
 }
 
@@ -112,6 +114,8 @@ parameters{
   
   real log_f;
   
+  real <lower = 0> theta_d;
+  
 }
 
 transformed parameters{
@@ -132,6 +136,11 @@ transformed parameters{
 
   real dens_p_y_hat [np, ny_train]; // for tracking sum density 
   
+  real n_eff [np, ny_train]; // for tracking sum density 
+
+  real n_raw [np, ny_train]; // for tracking sum density 
+
+
   vector[ny_train-1] rec_dev; // array of realized recruitment deviates, also now only 1/yr (it's a good or bad year everywhere)
   
   vector[n_lbins] selectivity_at_bin; // mean selectivity at length bin midpoint
@@ -184,7 +193,7 @@ transformed parameters{
   // calculate recruitment deviates every year (not patch-specific)
   for (y in 2:ny_train){
     if (y == 2){
-      rec_dev[y-1]  =  raw[2]; // initialize first year of rec_dev with raw (process error) -- now not patch-specific
+      rec_dev[y-1]  =  raw[y]; // initialize first year of rec_dev with raw (process error) -- now not patch-specific
 
     } // close y==2 case
     else {
@@ -258,6 +267,10 @@ transformed parameters{
       dens_p_y_hat[p,y] = sum((to_vector(n_p_l_y_hat[y,p,1:n_lbins])));
      
       c_p_y_hat[p,y] =  sum((to_vector(c_p_a_y_hat[p,1:n_ages,y])));
+      
+      n_eff[p,y] = (1 + theta_d * sum(n_p_l_y[p,1:n_lbins, y])) / (1 + theta_d);
+      
+      n_raw[p,y] = sum(n_p_l_y[p,1:n_lbins, y]);
  
     }
   }
@@ -266,7 +279,16 @@ transformed parameters{
 
 model {
   
+  real n;
+  
+  vector[n_lbins] prob_hat;
+  
+  vector[n_lbins] prob;
 
+  real dml_tmp;
+  
+  real test;
+  
   log_mean_recruits ~ normal(10,5);
   
   log_f ~ normal(log(.1),.1);
@@ -274,6 +296,8 @@ model {
   sigma ~ normal(1,.1);  // total error prior
 
   proc_ratio ~normal(0.5,.1);
+  
+  theta_d ~ normal(0.5,.1);
 
   p_length_50_sel ~ normal(length_50_sel_guess/loo, 1);
   
@@ -287,8 +311,29 @@ model {
 
         if (sum(n_p_l_y[p,1:n_lbins,y]) > 0){
         
-        (n_p_l_y[p,1:n_lbins,y]) ~ multinomial((to_vector(n_p_l_y_hat[y,p,1:n_lbins])  / sum(to_vector(n_p_l_y_hat[y,p,1:n_lbins]))));
+        if (do_dirichlet == 1){
+        
+        prob_hat = (to_vector(n_p_l_y_hat[y,p,1:n_lbins])  / sum(to_vector(n_p_l_y_hat[y,p,1:n_lbins])));
+        
+        prob = (to_vector(n_p_l_y[p,1:n_lbins,y])  / sum(to_vector(n_p_l_y[p,1:n_lbins,y])));
 
+        n = sum(n_p_l_y[p,1:n_lbins,y]);
+        
+        dml_tmp = lgamma(n + 1) -  sum(lgamma(n * prob + 1)) + lgamma(theta_d * n) - lgamma(n + theta_d * n) + sum(lgamma(n * prob + theta_d * n * prob_hat) - lgamma(theta_d * n * prob_hat)); // see https://github.com/merrillrudd/LIME/blob/9dcfc7f7d5f56f280767c6900972de94dd1fea3b/src/LIME.cpp#L559 for log transformation of dirichlet-multinomial in Thorston et al. 2017
+        
+        // dml_tmp = lgamma(n + 1) - sum(lgamma(n * prob_hat + 1)) + (lgamma(theta_d * n) - lgamma(n + theta_d * n)) * prod(((lgamma(n * prob_hat + theta_d * n * prob))./(lgamma(theta_d * n * prob))));
+        
+        // test = prod(1:10);
+        
+        // print(dml_tmp);
+        
+        target += dml_tmp;
+        
+        } else 
+        {
+        
+        (n_p_l_y[p,1:n_lbins,y]) ~ multinomial((to_vector(n_p_l_y_hat[y,p,1:n_lbins])  / sum(to_vector(n_p_l_y_hat[y,p,1:n_lbins]))));
+        }
         // (n_p_a_y[p,1:n_ages,y]) ~ multinomial((to_vector(n_p_a_y_hat[p,1:n_ages,y]) ./ sum(to_vector(n_p_a_y_hat[p,1:n_ages,y]))));
 
 

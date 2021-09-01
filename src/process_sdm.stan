@@ -135,7 +135,7 @@ parameters{
   //real<lower=0> phi_obs; // I thought it was possible for this parameter to be negtive, but at one point got this error: Exception: neg_binomial_2_lpmf: Precision parameter is -0.317205, but must be > 0!  (in 'model1ee6785925e9_stage_ar_model_adult_dispersal' at line 145)
   real<lower=0> sigma_obs;
   
-  real p_length_50_sel; // length at 50% selectivity
+  real<upper = 1> p_length_50_sel; // length at 50% selectivity
   
   real<lower=0, upper=1> theta; // Bernoulli parameter for encounter probability
   
@@ -218,12 +218,12 @@ transformed parameters{
   // calculate recruitment deviates every year (not patch-specific)
   for (y in 2:ny_train){
     if (y == 2){ 
-      rec_dev[y-1]  =  raw[2]; // initialize first year of rec_dev with raw (process error) -- now not patch-specific
+      rec_dev[y-1]  =  raw[y]; // initialize first year of rec_dev with raw (process error) -- now not patch-specific
       // need to fix this awkward burn in
     } // close y==2 case  
     else {
       
-      rec_dev[y-1] =  alpha * rec_dev[y-2] + raw[y-1]; 
+      rec_dev[y-1] =  alpha * rec_dev[y-2] + raw[y]; 
       
     } // close ifelse
     
@@ -316,14 +316,21 @@ model {
   
   // log_scalar ~ normal(log(2),1);
   
+  raw ~ normal(0, sigma_r);
+  
   for(y in 2:ny_train) {
     
-    raw[y-1] ~ normal(0,sigma_r); // prior on raw process error (sorry this is kinda buried in the multinomial stuff)
-    
     for(p in 1:np){
+      
       if((abund_p_y[p,y]) > 0) {
         
-        (n_p_l_y[p,1:n_lbins,y]) ~ multinomial((to_vector(n_p_l_y_hat[y,p,1:n_lbins]) / sum(to_vector(n_p_l_y_hat[y,p,1:n_lbins]))));
+    
+        if (sum(n_p_l_y[p,1:n_lbins,y]) > 0) {
+          
+         (n_p_l_y[p,1:n_lbins,y]) ~ multinomial((to_vector(n_p_l_y_hat[y,p,1:n_lbins]) / sum(to_vector(n_p_l_y_hat[y,p,1:n_lbins]))));
+
+        }
+        
 
         log(abund_p_y[p,y]) ~ normal(log( dens_p_y_hat[p,y] + 1e-6), sigma_obs); 
         

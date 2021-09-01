@@ -213,8 +213,8 @@ n_ages <- nrow(l_at_a_mat)
 
 # make matrices/arrays from dfs
 
-length_samples <- length_samples %>%
-  filter(patch ==1, year %in% c(1,5,6,10,12,15))
+# length_samples <- length_samples %>%
+#   filter(patch ==1, year %in% c(1,5,6,10,12,15))
 
 len <- array(0, dim = c(np, n_lbins, ny)) 
 for(p in 1:np){
@@ -299,7 +299,9 @@ stan_data <- list(
   sel_100 = 3, # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
   age_at_maturity = round(fish$age_mature),
   patcharea = rep(1, np),
-  l_at_a_key = l_at_a_mat
+  l_at_a_key = l_at_a_mat,
+  do_dirichlet = 1,
+  tester = c(1,2,3)
 )
 
 warmups <- 1000
@@ -309,7 +311,8 @@ n_chains <-  1
 n_cores <- 1
 stan_model_fit <- stan(file = here::here("src","test_model.stan"), # check that it's the right model!
                        data = stan_data,
-                       init = list(list(log_mean_recruits = rep(log(100000), np))),
+                       init = list(list(log_mean_recruits = rep(log(100000), np),
+                                        theta_d = 1)),
                        chains = n_chains,
                        warmup = warmups,
                        iter = total_iterations,

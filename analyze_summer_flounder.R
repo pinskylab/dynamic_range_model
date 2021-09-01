@@ -279,6 +279,12 @@ dat_train_lengths <- dat_train_lengths %>%
   group_by(patch, year) %>% 
   mutate(p_length = sum_num_at_length / sum(sum_num_at_length))
 
+dat_train_lengths %>% 
+  group_by(year,patch) %>% 
+  summarise(n = sum(sum_num_at_length)) %>% 
+  ggplot(aes(year, n, color =factor(patch))) + 
+  geom_point()
+
 n_p_l_y_hat %>% 
   ungroup() %>% 
   filter(patch == p) %>% 

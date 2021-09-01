@@ -33,7 +33,7 @@ gglength <- dat %>%
   scale_y_discrete(expand = c(0, 0))  + 
   facet_wrap(~lat_floor) + 
   coord_flip()
-gglength  
+# gglength  
 ggsave(gglength, filename=here("results","summer_flounder_length_freq.png"))
 
 # by patch -- 
@@ -49,7 +49,7 @@ ggpatchlength <- dat %>%
                       stat="density") +
   scale_y_discrete(expand = c(0, 0)) +
   facet_wrap(~lat_floor, scales = "free_y")
-ggpatchlength  
+# ggpatchlength  
 ggsave(ggpatchlength, filename=here("results","summer_flounder_length_freq_by_patch.png"), height=8, width=5, dpi=160)
 # not sure this doesn't have any data in the other patches, maybe they are missing years? 
 
@@ -168,16 +168,16 @@ dat_train_sbt$year= as.integer(as.factor(dat_train_sbt$year))
 
 # make matrices/arrays from dfs
 len <- array(0, dim = c(np, n_lbins, ny)) 
-for(p in 1:np){
-  for(l in 1:n_lbins){
-    for(y in 1:ny){
-      tmp <- dat_train_lengths %>% filter(patch==p, round(length)==lbins[l], year==y) 
-      if (nrow(tmp) > 0){
-        len[p,l,y] <- tmp$sum_num_at_length
-      }
-    }
-  }
-}
+# for(p in 1:np){
+#   for(l in 1:n_lbins){
+#     for(y in 1:ny){
+#       tmp <- dat_train_lengths %>% filter(patch==p, round(length)==lbins[l], year==y) 
+#       if (nrow(tmp) > 0){
+#         len[p,l,y] <- tmp$sum_num_at_length
+#       }
+#     }
+#   }
+# }
 
 plot(len[4,,20])
 
@@ -229,12 +229,12 @@ stan_data <- list(
   l_at_a_key = l_at_a_mat
 )
 
-warmups <- 1000
-total_iterations <- 2000
+warmups <- 2500
+total_iterations <- 5000
 max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
-stan_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_summer_flounder_nocomp.stan"), # check that it's the right model!
+stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!
                        data = stan_data,
                        chains = n_chains,
                        warmup = warmups,
@@ -292,7 +292,7 @@ n_p_l_y_hat %>%
 
 
 
-
+stop()
 # now fit the generated length comps --------------------------------------
 
 tmp_len <- rstan::extract(stan_model_fit, "n_p_l_y_hat")$n_p_l_y_hat
@@ -307,7 +307,7 @@ for(p in 1:np){
 }
 
 
-plot(len2[4,,24])
+plot(len2[5,,1])
 
 stan_data_2 <- list(
   np=np,
@@ -317,7 +317,7 @@ stan_data_2 <- list(
   n_p_l_y = len2,
   abund_p_y = dens,
   sbt = sbt,
-  z=z,
+  m=m,
   k=k,
   loo=loo,
   t0=t0,
@@ -332,7 +332,7 @@ stan_data_2 <- list(
   l_at_a_key = l_at_a_mat
 )
 
-stan_model_fit_2 <- stan(file = here::here("src","T_dep_rec_age_str_summer_flounder.stan"), # check that it's the right model!
+stan_model_fit_2 <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!
                          data = stan_data_2,
                          chains = n_chains,
                          warmup = warmups,
@@ -344,6 +344,8 @@ stan_model_fit_2 <- stan(file = here::here("src","T_dep_rec_age_str_summer_floun
 )
 
 tmp <- rstan::extract(stan_model_fit_2, "sigma_obs")$sigma_obs
+
+tmp2 <- rstan::extract(stan_model_fit_2, "length_50_sel")$length_50_sel
 
 
 abund_p_y <- dat_train_dens %>%
@@ -357,7 +359,7 @@ abund_p_y_hat_2 <- tidybayes::spread_draws(stan_model_fit_2, dens_p_y_hat[patch,
 
 abund_p_y_hat_2 %>% 
   ggplot(aes(year, dens_p_y_hat)) + 
-  stat_lineribbon() + 
+  stat_lineribbon() +
   geom_point(data = abund_p_y, aes(year, abundance), color = "red") +
   facet_wrap(~patch, scales = "free_y")
 
