@@ -305,7 +305,7 @@ model {
   
   sigma_obs ~ normal(.1, .1); // think more about whether these numbers are reasonable
   
-  p_length_50_sel ~ normal(length_50_sel_guess/loo, .2);
+  p_length_50_sel ~ normal(length_50_sel_guess/loo, .05);
   
   // log_scalar ~ normal(log(2),1);
   
@@ -316,9 +316,9 @@ model {
     for(p in 1:np){
       if((abund_p_y[p,y]) > 0) {
         
-        (n_p_l_y[p,1:n_lbins,y]) ~ multinomial((to_vector(n_p_l_y_hat[y,p,1:n_lbins]) / sum(to_vector(n_p_l_y_hat[y,p,1:n_lbins]))));
+        // (n_p_l_y[p,1:n_lbins,y]) ~ multinomial((to_vector(n_p_l_y_hat[y,p,1:n_lbins]) / sum(to_vector(n_p_l_y_hat[y,p,1:n_lbins]))));
 
-        log(abund_p_y[p,y]) ~ normal(log( dens_p_y_hat[p,y] + 1e-6), sigma_obs); 
+        log(abund_p_y[p,y]) ~ normal(log(dens_p_y_hat[p,y] + 1e-6), sigma_obs); 
         
         1 ~ bernoulli(theta);
         
