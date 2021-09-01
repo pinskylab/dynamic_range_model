@@ -44,7 +44,7 @@ fleet <- create_fleet(
   fleet_model = "constant-effort",
   target_catch = 200,
   sigma_effort = 0,
-  length_50_sel = -10, #.01 * fish$length_50_mature,
+  length_50_sel = .5 * fish$length_50_mature,
   initial_effort = (fish$m / .1) * np,
   profit_lags =  1,
   beta = 1,
@@ -142,7 +142,8 @@ abundance_index <- n_at_age %>%
   select(year,patch, data) %>% 
   unnest(cols = data) %>% 
   group_by(year, patch) %>% 
-  summarise(numbers = sum(numbers))
+  summarise(numbers = sum(numbers_caught)) %>% 
+  ungroup()
 
 abundance_index %>% 
   ggplot(aes(year, numbers, color = factor(patch))) + 
@@ -212,9 +213,9 @@ n_ages <- nrow(l_at_a_mat)
 
 # make matrices/arrays from dfs
 
-# length_samples <- length_samples %>% 
-#   filter(patch ==1, year == 10)
-#  
+length_samples <- length_samples %>%
+  filter(patch ==1, year %in% c(1,5,6,10,12,15))
+
 len <- array(0, dim = c(np, n_lbins, ny)) 
 for(p in 1:np){
   for(l in 1:n_lbins){
@@ -243,9 +244,9 @@ for(p in 1:np){
   }
 }
 
-plot(len[1,,3])
+plot(len[1,,2])
 
-plot(ages[1,,3])
+# plot(ages[1,,3])
 
 
 dens <- array(NA, dim=c(np, ny))
@@ -301,8 +302,8 @@ stan_data <- list(
   l_at_a_key = l_at_a_mat
 )
 
-warmups <- 5000
-total_iterations <- 10000
+warmups <- 1000
+total_iterations <- 2000
 max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
@@ -324,7 +325,7 @@ a = extract(stan_model_fit, "sigma_obs")
 # b = extract(stan_model_fit, "scalar")
 
 hist(a$sigma_obs)
-rstanarm::launch_shinystan(stan_model_fit)
+# rstanarm::launch_shinystan(stan_model_fit)
 
 # assess abundance fits
 
@@ -335,7 +336,9 @@ abund_p_y_hat %>%
   ggplot(aes(year, (dens_p_y_hat ))) + 
   stat_lineribbon() + 
   geom_point(data = abundance_index, aes(year, (numbers)), color = "red") +
-  facet_wrap(~patch, scales = "free_y")
+  facet_wrap(~patch, scales = "free_y") + 
+  scale_x_continuous(name = "Year") + 
+  scale_y_continuous(name = "Abundance")
 
 n_p_l_y_hat <- tidybayes::gather_draws(stan_model_fit, n_p_l_y_hat[year,patch,length], n = 500)
 

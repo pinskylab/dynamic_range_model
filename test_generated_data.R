@@ -173,7 +173,7 @@ for(p in 1:np){
     for(y in 1:ny){
       tmp <- dat_train_lengths %>% filter(patch==p, round(length)==lbins[l], year==y) 
       if (nrow(tmp) > 0){
-      len[p,l,y] <- tmp$sum_num_at_length
+        len[p,l,y] <- tmp$sum_num_at_length
       }
     }
   }
@@ -234,15 +234,15 @@ total_iterations <- 2000
 max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
-stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!
-                      data = stan_data,
-                      chains = n_chains,
-                      warmup = warmups,
-                      iter = total_iterations,
-                      cores = n_cores,
-                      refresh = 250,
-                      control = list(max_treedepth = max_treedepth,
-                                     adapt_delta = 0.85)
+stan_model_fit <- stan(file = here::here("src","T_dep_rec_age_str_summer_flounder_nocomp.stan"), # check that it's the right model!
+                       data = stan_data,
+                       chains = n_chains,
+                       warmup = warmups,
+                       iter = total_iterations,
+                       cores = n_cores,
+                       refresh = 250,
+                       control = list(max_treedepth = max_treedepth,
+                                      adapt_delta = 0.85)
 )
 
 # a = extract(stan_model_fit, "sigma_obs")
@@ -257,7 +257,7 @@ abund_p_y <- dat_train_dens %>%
   group_by(patch, year) %>% 
   summarise(abundance = sum(mean_dens *patch_area_km2)) %>% 
   ungroup()
-  
+
 
 abund_p_y_hat <- tidybayes::spread_draws(stan_model_fit, dens_p_y_hat[patch,year])
 
@@ -293,6 +293,100 @@ n_p_l_y_hat %>%
 
 
 
+# now fit the generated length comps --------------------------------------
+
+tmp_len <- rstan::extract(stan_model_fit, "n_p_l_y_hat")$n_p_l_y_hat
+
+# make matrices/arrays from dfs
+len2 <- array(0, dim = c(np, n_lbins, ny)) 
+for(p in 1:np){
+  for(y in 1:ny){
+    tmp <- round(colMeans(tmp_len[,y,p,]))
+    len2[p,,y] <- tmp
+  }
+}
+
+
+plot(len2[4,,24])
+
+stan_data_2 <- list(
+  np=np,
+  n_ages=n_ages,
+  ny_train=ny,
+  n_lbins=n_lbins,
+  n_p_l_y = len2,
+  abund_p_y = dens,
+  sbt = sbt,
+  z=z,
+  k=k,
+  loo=loo,
+  t0=t0,
+  cv=cv,
+  length_50_sel_guess=20, # THIS IS A RANDOM GUESS, I can't find help in the stock assessment
+  n_lbins = n_lbins, 
+  age_sel = 0,
+  bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
+  sel_100 = 3, # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
+  age_at_maturity = age_at_maturity,
+  patcharea = patchdat$patch_area_km2,
+  l_at_a_key = l_at_a_mat
+)
+
+stan_model_fit_2 <- stan(file = here::here("src","T_dep_rec_age_str_summer_flounder.stan"), # check that it's the right model!
+                         data = stan_data_2,
+                         chains = n_chains,
+                         warmup = warmups,
+                         iter = total_iterations,
+                         cores = n_cores,
+                         refresh = 250,
+                         control = list(max_treedepth = max_treedepth,
+                                        adapt_delta = 0.85)
+)
+
+tmp <- rstan::extract(stan_model_fit_2, "sigma_obs")$sigma_obs
+
+
+abund_p_y <- dat_train_dens %>%
+  left_join(patchdat, by = c("lat_floor", "patch")) %>% 
+  group_by(patch, year) %>% 
+  summarise(abundance = sum(mean_dens *patch_area_km2)) %>% 
+  ungroup()
+
+
+abund_p_y_hat_2 <- tidybayes::spread_draws(stan_model_fit_2, dens_p_y_hat[patch,year])
+
+abund_p_y_hat_2 %>% 
+  ggplot(aes(year, dens_p_y_hat)) + 
+  stat_lineribbon() + 
+  geom_point(data = abund_p_y, aes(year, abundance), color = "red") +
+  facet_wrap(~patch, scales = "free_y")
+
+# assess length comp fits
+
+n_p_l_y_hat_2 <- tidybayes::gather_draws(stan_model_fit_2, n_p_l_y_hat[year,patch,length], n = 500)
+
+n_p_l_y_2 <- reshape2::melt(len2)
+
+names(n_p_l_y_2) <- c("patch","length","year","number")
+
+n_p_l_y_2 <- as_tibble(n_p_l_y_2)
+
+
+p = 5
+
+n_p_l_y_2 <- n_p_l_y_2 %>% 
+  group_by(patch, year) %>% 
+  mutate(p_length = number / sum(number))
+
+n_p_l_y_hat_2 %>% 
+  ungroup() %>% 
+  filter(patch == p) %>% 
+  group_by(patch, year, .iteration) %>% 
+  mutate(pvalue = .value / sum(.value)) %>% 
+  ggplot(aes(length, pvalue)) + 
+  stat_lineribbon() + 
+  geom_point(data = n_p_l_y_2 %>% filter(patch == p), aes(length,p_length), color = "red", alpha = 0.2) +
+  facet_wrap(~year, scales = "free_y")
 
 
 
