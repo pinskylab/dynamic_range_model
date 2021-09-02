@@ -300,8 +300,7 @@ stan_data <- list(
   age_at_maturity = round(fish$age_mature),
   patcharea = rep(1, np),
   l_at_a_key = l_at_a_mat,
-  do_dirichlet = 1,
-  tester = c(1,2,3)
+  do_dirichlet = 1
 )
 
 warmups <- 1000
@@ -309,7 +308,7 @@ total_iterations <- 2000
 max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
-stan_model_fit <- stan(file = here::here("src","test_model.stan"), # check that it's the right model!
+stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!
                        data = stan_data,
                        init = list(list(log_mean_recruits = rep(log(100000), np),
                                         theta_d = 1)),

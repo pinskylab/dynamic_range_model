@@ -79,7 +79,8 @@ data {
   
   vector[np] patcharea;
   
-  
+  int<lower = 0, upper = 1> do_dirichlet;
+
 }
 
 transformed data{
@@ -116,33 +117,38 @@ transformed data{
 }
 
 parameters{
+    
+  real<lower = 1e-3> sigma_r;
+
+  real<lower = 1e-3> sigma_obs;
   
   real<lower=1e-3> width; // sensitivity to temperature variation
   
   real Topt; //  temp at which recruitment is maximized
   
-  real log_sigma_r; // sigma recruits
+  // real<lower = 1e-3,upper = 10> sigma;
   
+  // real<lower = 0, upper = 1>  proc_ratio; // sigma recruits
+    
   real<lower = -1, upper = 1> alpha; // autocorrelation term 
   
   // real  log_mean_recruits; // log mean recruits per patch, changed to one value for all space/time
   
   vector[np] log_mean_recruits;
   
-  vector[ny_train-1] raw; // array of raw recruitment deviates, changed to one value per year
-  
-  //  real<lower = 1e-3> sigma_obs;
-  //real<lower=0> phi_obs; // I thought it was possible for this parameter to be negtive, but at one point got this error: Exception: neg_binomial_2_lpmf: Precision parameter is -0.317205, but must be > 0!  (in 'model1ee6785925e9_stage_ar_model_adult_dispersal' at line 145)
-  real<lower=0> sigma_obs;
-  
-  real<upper = 1> p_length_50_sel; // length at 50% selectivity
+  vector[ny_train] raw; // array of raw recruitment deviates, changed to one value per year
+
+  real<upper = 0.8> p_length_50_sel; // length at 50% selectivity
   
   real<lower=0, upper=1> theta; // Bernoulli parameter for encounter probability
   
   real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
   
-  real log_f;
+  real<upper = log(0.6)> log_f;
   // real log_scalar;
+  
+  real <lower = 0> theta_d;
+
   
 }
 
@@ -150,7 +156,9 @@ transformed parameters{
   
   real T_adjust[np, ny_train]; // tuning parameter for sbt suitability in each patch*year
   
-  real sigma_r;
+  // real sigma_r;
+  
+  // real sigma_obs;
   
   real length_50_sel;
   
@@ -178,6 +186,10 @@ transformed parameters{
   
   real z = exp(-(f + m));
   
+  // sigma_r = sigma * proc_ratio;
+  
+  // sigma_obs = sigma * (1 - proc_ratio);
+  
   sel_delta = 2;
   
   length_50_sel = loo * p_length_50_sel; // Dan made a note to change this sometime
@@ -187,8 +199,6 @@ transformed parameters{
   // mean_selectivity_at_age = length_at_age_key * selectivity_at_bin; // calculate mean selectivity at age given variance in length at age
   
   //  print("mean selectivity at age is ",mean_selectivity_at_age); // check that counts are different for every year
-  
-  sigma_r = exp(log_sigma_r);
   
   mean_recruits = exp(log_mean_recruits);
   
@@ -294,6 +304,17 @@ transformed parameters{
 
 model {
   
+  real n;
+  
+  vector[n_lbins] prob_hat;
+  
+  vector[n_lbins] prob;
+
+  real dml_tmp;
+  
+  real test;
+  
+  
   theta ~ uniform(0, 1); // Bernoulli probability of encounter
   
   d ~ normal(0.1, 0.1); // dispersal rate as a proportion of total population size within the patch
@@ -306,17 +327,28 @@ model {
   
   width ~ normal(4, 4); 
   
-  log_sigma_r ~ normal(log(.5),.1); // process error prior
+  // log_sigma_r ~ normal(log(.5),.1); // process error prior
   
   alpha ~ normal(0,.25); // autocorrelation prior
   
-  sigma_obs ~ normal(.1, .1); // think more about whether these numbers are reasonable
+  // sigma ~ normal(1,.1);  // total error prior
+  // 
+  // proc_ratio ~ beta(2,2);
+  // 
+   sigma_r ~ normal(.7,.2);
+  
+  sigma_obs ~ normal(0.1,.2);
+  
+  // sigma_obs ~ normal(.1, .1); // think more about whether these numbers are reasonable
   
   p_length_50_sel ~ normal(length_50_sel_guess/loo, .2);
   
   // log_scalar ~ normal(log(2),1);
   
   raw ~ normal(0, sigma_r);
+  
+    theta_d ~ normal(0.5,.1);
+
   
   for(y in 2:ny_train) {
     
@@ -327,11 +359,32 @@ model {
     
         if (sum(n_p_l_y[p,1:n_lbins,y]) > 0) {
           
-         (n_p_l_y[p,1:n_lbins,y]) ~ multinomial((to_vector(n_p_l_y_hat[y,p,1:n_lbins]) / sum(to_vector(n_p_l_y_hat[y,p,1:n_lbins]))));
-
-        }
+        if (do_dirichlet == 1){
         
+        prob_hat = (to_vector(n_p_l_y_hat[y,p,1:n_lbins])  / sum(to_vector(n_p_l_y_hat[y,p,1:n_lbins])));
+        
+        prob = (to_vector(n_p_l_y[p,1:n_lbins,y])  / sum(to_vector(n_p_l_y[p,1:n_lbins,y])));
 
+        n = sum(n_p_l_y[p,1:n_lbins,y]);
+        
+        dml_tmp = lgamma(n + 1) -  sum(lgamma(n * prob + 1)) + lgamma(theta_d * n) - lgamma(n + theta_d * n) + sum(lgamma(n * prob + theta_d * n * prob_hat) - lgamma(theta_d * n * prob_hat)); // see https://github.com/merrillrudd/LIME/blob/9dcfc7f7d5f56f280767c6900972de94dd1fea3b/src/LIME.cpp#L559 for log transformation of dirichlet-multinomial in Thorston et al. 2017
+        
+        // dml_tmp = lgamma(n + 1) - sum(lgamma(n * prob_hat + 1)) + (lgamma(theta_d * n) - lgamma(n + theta_d * n)) * prod(((lgamma(n * prob_hat + theta_d * n * prob))./(lgamma(theta_d * n * prob))));
+        
+        // test = prod(1:10);
+        
+        // print(dml_tmp);
+        
+        target += dml_tmp;
+        
+        } else {
+        
+        (n_p_l_y[p,1:n_lbins,y]) ~ multinomial((to_vector(n_p_l_y_hat[y,p,1:n_lbins])  / sum(to_vector(n_p_l_y_hat[y,p,1:n_lbins]))));
+        
+        } // close dirichlet statement
+
+        } // close if any length comps
+        
         log(abund_p_y[p,y]) ~ normal(log( dens_p_y_hat[p,y] + 1e-6), sigma_obs); 
         
         1 ~ bernoulli(theta);

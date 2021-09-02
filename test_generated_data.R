@@ -226,11 +226,12 @@ stan_data <- list(
   sel_100 = 3, # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
   age_at_maturity = age_at_maturity,
   patcharea = patchdat$patch_area_km2,
-  l_at_a_key = l_at_a_mat
+  l_at_a_key = l_at_a_mat,
+  do_dirichlet = 1
 )
 
-warmups <- 2500
-total_iterations <- 5000
+warmups <- 1500
+total_iterations <- 3000
 max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
@@ -238,7 +239,7 @@ stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that
                        data = stan_data,
                        chains = n_chains,
                        warmup = warmups,
-                       iter = total_iterations,
+                        iter = total_iterations,
                        cores = n_cores,
                        refresh = 250,
                        control = list(max_treedepth = max_treedepth,
@@ -248,7 +249,7 @@ stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that
 # a = extract(stan_model_fit, "sigma_obs")
 
 # hist(a$sigma_obs)
-# rstanarm::launch_shinystan(stan_model_fit)
+rstanarm::launch_shinystan(stan_model_fit)
 
 # assess abundance fits
 
@@ -329,7 +330,8 @@ stan_data_2 <- list(
   sel_100 = 3, # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
   age_at_maturity = age_at_maturity,
   patcharea = patchdat$patch_area_km2,
-  l_at_a_key = l_at_a_mat
+  l_at_a_key = l_at_a_mat,
+  do_dirichlet = 1
 )
 
 stan_model_fit_2 <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!
@@ -390,7 +392,7 @@ n_p_l_y_hat_2 %>%
   geom_point(data = n_p_l_y_2 %>% filter(patch == p), aes(length,p_length), color = "red", alpha = 0.2) +
   facet_wrap(~year, scales = "free_y")
 
-
+save(list = c("stan_model_fit","stan_model_fit_2"), file = "flounderfits.Rdata")
 
 
 

@@ -11,8 +11,7 @@ functions {
 data {
   
   // survey data 
-  vector[3] tester;
-  
+
   int n_ages; // number of ages
   
   int np; // number of patches
@@ -25,14 +24,14 @@ data {
   
   int n_p_l_y[np, n_lbins, ny_train]; // SUM number of individuals in each length bin, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
   
-    int n_p_a_y[np, n_ages, ny_train]; // SUM number of individuals in each length bin, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
+    // int n_p_a_y[np, n_ages, ny_train]; // SUM number of individuals in each length bin, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
 
   
   matrix[n_ages, n_lbins] l_at_a_key;
  
   real abund_p_y[np, ny_train]; // MEAN density of individuals of any age in each haul; used for rescaling the abundance to fit to our data
   
-  matrix[np, ny_train] c_p_y;
+  // matrix[np, ny_train] c_p_y;
 
   
   // environmental data 
@@ -100,10 +99,15 @@ transformed data{
 
 parameters{
   
-  real<lower = 1e-3,upper = 10> sigma;
   
-  real<lower = 0, upper = 1>  proc_ratio; // sigma recruits
-  
+  real<lower = 1e-3> sigma_r;
+
+  real<lower = 1e-3> sigma_obs;
+
+  // real<lower = 1e-3,upper = 10> sigma;
+  // 
+  // real<lower = 0, upper = 1>  proc_ratio; // sigma recruits
+  // 
   vector[np] log_mean_recruits;
   
   vector[ny_train] raw; // array of raw recruitment deviates, changed to one value per year
@@ -120,9 +124,9 @@ parameters{
 
 transformed parameters{
   
-  real sigma_r;
+  // real sigma_r;
   
-  real sigma_obs;
+  // real sigma_obs;
   
   real length_50_sel;
   
@@ -161,10 +165,9 @@ transformed parameters{
 
   c_p_a_y_hat = rep_array(0, np, n_ages,ny_train);
 
+  // sigma_r = sigma * proc_ratio;
   
-  sigma_r = sigma * proc_ratio;
-  
-  sigma_obs = sigma * (1 - proc_ratio);
+  // sigma_obs = sigma * (1 - proc_ratio);
   
   sel_delta = 1;
   
@@ -293,9 +296,15 @@ model {
   
   log_f ~ normal(log(.1),.1);
   
-  sigma ~ normal(1,.1);  // total error prior
+  // sigma ~ normal(1,.1);  // total error prior
 
-  proc_ratio ~normal(0.5,.1);
+  // proc_ratio ~ beta(2,2);
+  
+  sigma_r ~ normal(.7,.2);
+  
+  sigma_obs ~ normal(0.1,.2);
+  
+  // normal(0.5,.1);
   
   theta_d ~ normal(0.5,.1);
 
@@ -320,31 +329,25 @@ model {
         n = sum(n_p_l_y[p,1:n_lbins,y]);
         
         dml_tmp = lgamma(n + 1) -  sum(lgamma(n * prob + 1)) + lgamma(theta_d * n) - lgamma(n + theta_d * n) + sum(lgamma(n * prob + theta_d * n * prob_hat) - lgamma(theta_d * n * prob_hat)); // see https://github.com/merrillrudd/LIME/blob/9dcfc7f7d5f56f280767c6900972de94dd1fea3b/src/LIME.cpp#L559 for log transformation of dirichlet-multinomial in Thorston et al. 2017
-        
-        // dml_tmp = lgamma(n + 1) - sum(lgamma(n * prob_hat + 1)) + (lgamma(theta_d * n) - lgamma(n + theta_d * n)) * prod(((lgamma(n * prob_hat + theta_d * n * prob))./(lgamma(theta_d * n * prob))));
-        
-        // test = prod(1:10);
-        
-        // print(dml_tmp);
-        
+
         target += dml_tmp;
         
         } else 
         {
         
         (n_p_l_y[p,1:n_lbins,y]) ~ multinomial((to_vector(n_p_l_y_hat[y,p,1:n_lbins])  / sum(to_vector(n_p_l_y_hat[y,p,1:n_lbins]))));
-        }
-        // (n_p_a_y[p,1:n_ages,y]) ~ multinomial((to_vector(n_p_a_y_hat[p,1:n_ages,y]) ./ sum(to_vector(n_p_a_y_hat[p,1:n_ages,y]))));
-
-
-          }
+        } // close dirichlet statement
+      
+        } // close if any observations
           // print(n_p_l_y[p,1:n_lbins,y]);
+          
+        if (abund_p_y[p,y] > 0) {
 
         log(abund_p_y[p,y]) ~ normal(log(dens_p_y_hat[p,y] + 1e-3), sigma_obs); 
         
+        }
         // log(c_p_y[p,y]) ~ normal(log(c_p_y_hat[p,y] + 1e-3), .05);
         // 
-        // print(c_p_y_hat[p,y]);
 
     } // close patch loop
     

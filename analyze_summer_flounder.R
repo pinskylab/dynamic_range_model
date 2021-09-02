@@ -226,7 +226,9 @@ stan_data <- list(
   sel_100 = 3, # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
   age_at_maturity = age_at_maturity,
   patcharea = patchdat$patch_area_km2,
-  l_at_a_key = l_at_a_mat
+  l_at_a_key = l_at_a_mat,
+  do_dirichlet = 1
+  
 )
 
 warmups <- 1000
@@ -234,10 +236,12 @@ total_iterations <- 2000
 max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
-stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!
+stan_model_fit <- stan(file = here::here("src","test_process_sdm.stan"), # check that it's the right model!
                       data = stan_data,
                       chains = n_chains,
                       warmup = warmups,
+                      init = list(list(log_mean_recruits = rep(log(100000), np),
+                                       theta_d = 1)),
                       iter = total_iterations,
                       cores = n_cores,
                       refresh = 250,
@@ -245,7 +249,7 @@ stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that
                                      adapt_delta = 0.85)
 )
 
-# a = extract(stan_model_fit, "sigma_obs")
+a = extract(stan_model_fit, "theta_d")
 
 # hist(a$sigma_obs)
 # rstanarm::launch_shinystan(stan_model_fit)
@@ -270,6 +274,9 @@ abund_p_y_hat %>%
 # assess length comp fits
 
 n_p_l_y_hat <- tidybayes::gather_draws(stan_model_fit, n_p_l_y_hat[year,patch,length], n = 500)
+
+neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
+
 
 dat_train_lengths
 
