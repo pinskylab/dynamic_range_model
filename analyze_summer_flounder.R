@@ -277,8 +277,7 @@ n_p_l_y_hat <- tidybayes::gather_draws(stan_model_fit, n_p_l_y_hat[year,patch,le
 
 # neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
 
-
-dat_train_lengths
+#neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
 
 p = 5
 
@@ -302,12 +301,31 @@ n_p_l_y_hat %>%
   geom_point(data = dat_train_lengths %>% filter(patch == p), aes(length,p_length), color = "red", alpha = 0.2) +
   facet_wrap(~year, scales = "free_y")
 
+# plot important parameters 
+plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','alpha','theta','theta_d','log_f'))
+#Topt going to about 20, width to about 8; zoom in on the others
+plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','alpha','theta','theta_d','log_f'))
 
 
+# save model run if desired
+saveRDS(stan_model_fit, here("results","summer_flounder_stan_fit.rds"))
 
+###########
+# calculate summary statistics and evaluate range shifts
+###########
 
+# centroid position by year 
+dat_centroid <- abund_p_y %>% 
+  group_by(year) %>% 
+  summarise(centroid_lat = weighted.mean(x=patch, w=abundance))
 
+# model fit centroid -- should eventually estimate in model for proper SE -- just exploring here
+est_centroid <- abund_p_y_hat %>% 
+  group_by(year, .draw) %>%  # IS THIS SUPPOSED TO BE .ITERATION? CHECK WHEN MODEL IS RUN FOR LONGER 
+  summarise(centroid_lat = weighted.mean(x=patch, w=dens_p_y_hat))
 
-
-
+est_centroid %>% 
+  ggplot(aes(year, centroid_lat)) + 
+  stat_lineribbon() + 
+  geom_point(data = dat_centroid, aes(year, centroid_lat), color = "red") 
 
