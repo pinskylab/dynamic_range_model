@@ -6,17 +6,41 @@ library(stringr)
 library(lubridate)
 here <- here::here
 
-# load data -- need to download all oceanadapt data from oceanadapt.rutgers.edu and store in this directory first
-OApath <- "~/github/OceanAdapt_9815545/"
+# download from: https://zenodo.org/badge/latestdoi/29789533
+OApath <- "~/github/OceanAdapt-update2020/"
 
-load(paste0(OApath,"data_clean/dat_exploded.Rdata")) # get zero-inflated survey data
+load(paste0(OApath,"data_clean/dat_exploded.rds")) # get zero-inflated survey data
 load(paste0(OApath,"data_raw/neus_Survdat.RData")) # get length data
 load(paste0(OApath, "data_raw/neus_SVSPP.RData")) # get taxonomy
 
 spp_of_interest <- c("Paralichthys dentatus")
 reg_of_interest <- c("Northeast US Fall")
-max_yr <- 2015 # avoiding the 2016 data gap
-min_yr <- 1972 # early years have some issues
+
+dat_exploded_neus <- dat_exploded %>% 
+  filter(region==reg_of_interest) 
+
+explore_data <- TRUE
+if(explore_data==TRUE){
+  
+  # get years each stratum was sampled 
+  stratum_pres <- dat_exploded_neus %>% 
+    select(stratum, year) %>% 
+    distinct() %>% 
+    mutate(sampled=TRUE)
+  
+  # get all combinations of stratum*year
+  stratum_all <- expand_grid(stratum=unique(dat_exploded_neus$stratum), year=unique(dat_exploded_neus$year)) %>% 
+    left_join(stratum_pres) %>% 
+    mutate(sampled = replace_na(sampled, FALSE)) %>% 
+    left_join(dat_exploded %>% select(lat, lon, stratum) %>% distinct()) # get lat/lon 
+  
+  ggplot(stratum_all, aes(x=year, y=lat, fill=sampled, color=sampled)) +
+    geom_tile() # looks like basically all strata are sampled every year 
+}
+
+
+max_yr <- 2016 # 2017 is missing, for some reason 
+min_yr <- 1972 # early years have some issues; the newly filtered OA data starts here anyway
 # to explore more the changes in samplng over time, make annual maps of haul locations, or a tile plot of year vs. lat band 
 forecast_yr_1 <- max_yr - 9
 
@@ -32,9 +56,6 @@ hauldat <- survdat %>%
          "lat"=LAT,
          "lon"=LON)
 
-# get the dat.exploded for just this region and survey
-dat_exploded_reg <- dat.exploded %>% 
-  filter(region == reg_of_interest) 
 
 # tidy length data
 len_flounder_prep <- survdat %>% 
@@ -52,8 +73,10 @@ len_flounder_prep <- survdat %>%
          "number_at_length"=NUMLEN)
 
 # need to create length df that still includes zeroes
-len_flounder <- expand.grid(haulid=unique(dat_exploded_reg$haulid), length=seq(min(len_flounder_prep$length), max(len_flounder_prep$length), 1)) %>% # get full factorial of every haul * length bin
+# important to use haulids from dat_exploded_neus because it has been cleaned
+len_flounder <- expand.grid(haulid=unique(dat_exploded_neus$haulid), length=seq(min(len_flounder_prep$length), max(len_flounder_prep$length), 1)) %>% # get full factorial of every haul * length bin
   mutate(spp = spp_of_interest) %>% 
+  # left_joining to use only the hauls in dat_exploded_neus
   left_join(len_flounder_prep, by=c('length','haulid','spp')) %>% 
   mutate(number_at_length = replace_na(number_at_length, 0)) %>%  # fill in absences with true zeroes
   left_join(hauldat)
