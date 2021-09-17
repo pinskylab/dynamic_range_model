@@ -142,7 +142,7 @@ parameters{
   
   real<lower=0, upper=1> theta; // Bernoulli parameter for encounter probability
   
-  // real<lower=0, upper=1> d; // dispersal fraction (0.333 = perfect admixture)
+  real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
   
   real<upper = log(0.6)> log_f;
   // real log_scalar;
@@ -188,7 +188,7 @@ transformed parameters{
   
   real alpha = 0;
   
-  real d = 0;
+  // real d = 0;
   // sigma_r = sigma * proc_ratio;
   
   // sigma_obs = sigma * (1 - proc_ratio);
@@ -333,8 +333,8 @@ model {
   
   // alpha ~ normal(0,.25); // autocorrelation prior
   
-  // d ~ normal(0, 0.1); // dispersal rate as a proportion of total population size within the patch
-
+  d ~ normal(0.1, 0.1); // dispersal rate as a proportion of total population size within the patch
+  
   // sigma ~ normal(1,.1);  // total error prior
   // 
   // proc_ratio ~ beta(2,2);
