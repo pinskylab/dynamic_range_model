@@ -33,7 +33,7 @@ gglength <- dat %>%
   scale_y_discrete(expand = c(0, 0))  + 
   facet_wrap(~lat_floor) + 
   coord_flip()
-gglength  
+# gglength  
 ggsave(gglength, filename=here("results","summer_flounder_length_freq.png"))
 
 # by patch -- 
@@ -49,7 +49,7 @@ ggpatchlength <- dat %>%
                       stat="density") +
   scale_y_discrete(expand = c(0, 0)) +
   facet_wrap(~lat_floor, scales = "free_y")
-ggpatchlength  
+# ggpatchlength  
 ggsave(ggpatchlength, filename=here("results","summer_flounder_length_freq_by_patch.png"), height=8, width=5, dpi=160)
 # not sure this doesn't have any data in the other patches, maybe they are missing years? 
 
@@ -236,11 +236,11 @@ total_iterations <- 2000
 max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
-stan_model_fit <- stan(file = here::here("src","test_process_sdm.stan"), # check that it's the right model!
+stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!
                       data = stan_data,
                       chains = n_chains,
                       warmup = warmups,
-                      init = list(list(log_mean_recruits = rep(log(100000), np),
+                      init = list(list(log_mean_recruits = rep(log(1000), np),
                                        theta_d = 1)),
                       iter = total_iterations,
                       cores = n_cores,
@@ -249,8 +249,8 @@ stan_model_fit <- stan(file = here::here("src","test_process_sdm.stan"), # check
                                      adapt_delta = 0.85)
 )
 
-a = extract(stan_model_fit, "theta_d")
-
+a = rstan::extract(stan_model_fit, "theta_d")
+# write_rds(stan_model_fit,"sigh.rds")
 # hist(a$sigma_obs)
 # rstanarm::launch_shinystan(stan_model_fit)
 
@@ -275,7 +275,7 @@ abund_p_y_hat %>%
 
 n_p_l_y_hat <- tidybayes::gather_draws(stan_model_fit, n_p_l_y_hat[year,patch,length], n = 500)
 
-neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
+# neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
 
 
 dat_train_lengths

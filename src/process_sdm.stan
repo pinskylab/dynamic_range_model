@@ -130,7 +130,7 @@ parameters{
   
   // real<lower = 0, upper = 1>  proc_ratio; // sigma recruits
     
-  real<lower = -1, upper = 1> alpha; // autocorrelation term 
+  // real<lower = -1, upper = 1> alpha; // autocorrelation term
   
   // real  log_mean_recruits; // log mean recruits per patch, changed to one value for all space/time
   
@@ -142,7 +142,7 @@ parameters{
   
   real<lower=0, upper=1> theta; // Bernoulli parameter for encounter probability
   
-  real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
+  // real<lower=0, upper=1> d; // dispersal fraction (0.333 = perfect admixture)
   
   real<upper = log(0.6)> log_f;
   // real log_scalar;
@@ -186,6 +186,9 @@ transformed parameters{
   
   real z = exp(-(f + m));
   
+  real alpha = 0;
+  
+  real d = 0;
   // sigma_r = sigma * proc_ratio;
   
   // sigma_obs = sigma * (1 - proc_ratio);
@@ -317,7 +320,6 @@ model {
   
   theta ~ uniform(0, 1); // Bernoulli probability of encounter
   
-  d ~ normal(0.1, 0.1); // dispersal rate as a proportion of total population size within the patch
   
   log_f ~ normal(log(m / 2),.5);
   
@@ -329,8 +331,10 @@ model {
   
   // log_sigma_r ~ normal(log(.5),.1); // process error prior
   
-  alpha ~ normal(0,.25); // autocorrelation prior
+  // alpha ~ normal(0,.25); // autocorrelation prior
   
+  // d ~ normal(0, 0.1); // dispersal rate as a proportion of total population size within the patch
+
   // sigma ~ normal(1,.1);  // total error prior
   // 
   // proc_ratio ~ beta(2,2);

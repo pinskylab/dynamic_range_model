@@ -322,11 +322,12 @@ stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that
 )
 
 
-a = extract(stan_model_fit, "sigma_obs")
+a = extract(stan_model_fit, "theta_d")
 
 # b = extract(stan_model_fit, "scalar")
 
-hist(a$sigma_obs)
+hist(a$theta_d)
+
 # rstanarm::launch_shinystan(stan_model_fit)
 
 # assess abundance fits
