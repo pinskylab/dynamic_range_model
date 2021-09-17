@@ -10,6 +10,8 @@ here <- here::here
 OApath <- "~/github/OceanAdapt-update2020/"
 
 load(paste0(OApath,"data_clean/dat_exploded.rds")) # get zero-inflated survey data
+# for some reason this line isn't working for me and I have to import it manually, not sure why
+
 load(paste0(OApath,"data_raw/neus_Survdat.RData")) # get length data
 load(paste0(OApath, "data_raw/neus_SVSPP.RData")) # get taxonomy
 
