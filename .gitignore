@@ -10,4 +10,7 @@ python/include/
 python/bin/
 *.jpg
 old/
-processed-data/fluke_catch_at_length_fall.csvß
+processed-data/fluke_catch_at_length_fall.csv
+src/*.rds
+flounderfits.Rdata
+results/*.rds
