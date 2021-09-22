@@ -322,10 +322,65 @@ dat_centroid <- abund_p_y %>%
 # model fit centroid -- should eventually estimate in model for proper SE -- just exploring here
 est_centroid <- abund_p_y_hat %>% 
   group_by(year, .draw) %>%  # IS THIS SUPPOSED TO BE .ITERATION? CHECK WHEN MODEL IS RUN FOR LONGER 
-  summarise(centroid_lat = weighted.mean(x=patch, w=dens_p_y_hat))
+  summarise(centroid_lat = weighted.mean(x=patch, w=dens_p_y_hat)) %>% 
+  ungroup()
 
 est_centroid %>% 
   ggplot(aes(year, centroid_lat)) + 
   stat_lineribbon() + 
+  scale_fill_brewer() +
   geom_point(data = dat_centroid, aes(year, centroid_lat), color = "red") 
+
+# centroid didn't shift at all!
+
+# patch abundance fraction every year 
+est_patch_abund <- abund_p_y_hat %>% 
+  group_by(year, patch) %>% 
+  summarise(abundance = mean(dens_p_y_hat))
+
+abund_p_y %>% 
+  ggplot(aes(x=year, y=patch, fill=abundance)) +
+  geom_tile() +
+  theme_bw() +
+  scale_x_continuous(breaks=seq(0, 36, 4)) +
+  scale_y_continuous(breaks=seq(1, 7, 1)) +
+  labs(title="Observed")
+
+
+est_patch_abund %>% 
+  ggplot(aes(x=year, y=patch, fill=abundance)) +
+  geom_tile() +
+  theme_bw() +
+  scale_x_continuous(breaks=seq(0, 36, 4)) +
+  scale_y_continuous(breaks=seq(1, 7, 1)) +
+  labs(title="Estimated")
+
+# who's doing the colonizing?
+dat_train_lengths %>% 
+  group_by(patch, length) %>% 
+  arrange(year) %>% 
+  mutate(logratio = log(sum_num_at_length / lag(sum_num_at_length))) %>% 
+  filter(logratio < Inf, logratio > -Inf) %>% 
+  ungroup() %>% 
+  ggplot(aes(x=year, y=logratio, group=length, color=length)) +
+  geom_point() + 
+  geom_line() +
+  scale_color_viridis_c() +
+  facet_wrap(~patch)
+
+dat_train_lengths %>% 
+  ggplot(aes(x=year, y=sum_num_at_length, fill=length)) + 
+  geom_bar(stat="identity") +
+  facet_wrap(~patch) +
+  scale_fill_viridis_c() +
+  theme_bw()
+
+
+dat_train_lengths %>% 
+  ggplot(aes(x=year, y=sum_num_at_length, fill=length)) + 
+  geom_bar(position="fill", stat="identity") +
+  facet_wrap(~patch) +
+  scale_fill_viridis_c() +
+  theme_bw()
+
 

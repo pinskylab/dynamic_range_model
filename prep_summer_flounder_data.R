@@ -38,7 +38,43 @@ if(explore_data==TRUE){
   
   ggplot(stratum_all, aes(x=year, y=lat, fill=sampled, color=sampled)) +
     geom_tile() # looks like basically all strata are sampled every year 
-}
+  
+  ggplot(stratum_pres, aes(x=stratum)) + 
+    geom_histogram(stat="count") +
+    theme(axis.text.x = element_text(angle=90))
+  
+  ggplot(stratum_all, aes(x=year, y=stratum, fill=sampled, color=sampled)) +
+    geom_tile()  
+  
+  load("~/github/OceanAdapt_9815545/data_clean/dat_exploded.Rdata")
+  
+  old_dat_exploded <- dat.exploded
+  rm(dat.exploded)
+
+  old_dat_exploded_neus <- old_dat_exploded %>% 
+    filter(region==reg_of_interest) 
+  
+  old_stratum_pres <- old_dat_exploded_neus %>% 
+    select(stratum, year) %>% 
+    distinct() %>% 
+    mutate(sampled=TRUE)
+  
+  ggplot(old_stratum_pres, aes(x=stratum)) + 
+    geom_histogram(stat="count") +
+    theme(axis.text.x = element_text(angle=90))
+  
+  # get all combinations of stratum*year
+  old_stratum_all <- expand_grid(stratum=unique(old_dat_exploded_neus$stratum), year=unique(old_dat_exploded_neus$year)) %>% 
+    left_join(old_stratum_pres) %>% 
+    mutate(sampled = replace_na(sampled, FALSE)) %>% 
+    left_join(old_dat_exploded %>% select(lat, lon, stratum) %>% distinct()) # get lat/lon 
+  
+  
+  ggplot(old_stratum_all, aes(x=year, y=stratum, fill=sampled, color=sampled)) +
+    geom_tile()  
+  
+  
+  }
 
 
 max_yr <- 2016 # 2017 is missing, for some reason 
