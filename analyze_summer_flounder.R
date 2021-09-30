@@ -18,40 +18,52 @@ rstan_options(javascript=FALSE, auto_write =TRUE)
 
 dat <- read_csv(here("processed-data","flounder_catch_at_length_fall_training.csv"))
 
-# how much variation is there in length frequency over time?
-gglength <- dat %>% 
-  mutate(lat_floor = floor(lat)) %>% 
-  filter(between(lat_floor, 37,41)) %>% 
-  group_by(length, year, lat_floor) %>% 
-  summarise(total = sum(number_at_length)) %>% 
-  mutate(year = as.character(year)) %>% 
-  ggplot(aes(x=length, y=year)) +
-  geom_density_ridges(aes(height=..density..,
-                          weight=total),    
-                      scale= 4,
-                      stat="density") +
-  scale_y_discrete(expand = c(0, 0))  + 
-  facet_wrap(~lat_floor) + 
-  coord_flip()
-# gglength  
-ggsave(gglength, filename=here("results","summer_flounder_length_freq.png"))
+# the f-at-age data starts in 1982; fill in the previous years with the earliest year of data
+dat_f_age <- read_csv(here("processed-data","summer_flounder_F_by_age.csv")) %>%
+  rename_with(str_to_lower)
+f_early <- expand_grid(year=seq(1972, 1981, 1), age=unique(dat_f_age$age)) %>% 
+  left_join(dat_f_age %>% filter(year==1982) %>% select(age, f)) 
+dat_f_age <- bind_rows(dat_f_age, f_early)
 
-# by patch -- 
-ggpatchlength <- dat %>% 
-  mutate(lat_floor = floor(lat)) %>% 
-  group_by(length, lat_floor, year) %>% 
-  summarise(total = sum(number_at_length)) %>% 
-  mutate(year = as.character(year)) %>% 
-  ggplot(aes(x=length, y=year)) +
-  geom_density_ridges(aes(height=..density..,
-                          weight=total),    
-                      scale= 4,
-                      stat="density") +
-  scale_y_discrete(expand = c(0, 0)) +
-  facet_wrap(~lat_floor, scales = "free_y")
-# ggpatchlength  
-ggsave(ggpatchlength, filename=here("results","summer_flounder_length_freq_by_patch.png"), height=8, width=5, dpi=160)
-# not sure this doesn't have any data in the other patches, maybe they are missing years? 
+make_data_plots <- FALSE
+
+if(make_data_plots==TRUE){
+  
+  # how much variation is there in length frequency over time?
+  gglength <- dat %>% 
+    mutate(lat_floor = floor(lat)) %>% 
+    filter(between(lat_floor, 37,41)) %>% 
+    group_by(length, year, lat_floor) %>% 
+    summarise(total = sum(number_at_length)) %>% 
+    mutate(year = as.character(year)) %>% 
+    ggplot(aes(x=length, y=year)) +
+    geom_density_ridges(aes(height=..density..,
+                            weight=total),    
+                        scale= 4,
+                        stat="density") +
+    scale_y_discrete(expand = c(0, 0))  + 
+    facet_wrap(~lat_floor) + 
+    coord_flip()
+  # gglength  
+  ggsave(gglength, filename=here("results","summer_flounder_length_freq.png"))
+  
+  # by patch -- 
+  ggpatchlength <- dat %>% 
+    mutate(lat_floor = floor(lat)) %>% 
+    group_by(length, lat_floor, year) %>% 
+    summarise(total = sum(number_at_length)) %>% 
+    mutate(year = as.character(year)) %>% 
+    ggplot(aes(x=length, y=year)) +
+    geom_density_ridges(aes(height=..density..,
+                            weight=total),    
+                        scale= 4,
+                        stat="density") +
+    scale_y_discrete(expand = c(0, 0)) +
+    facet_wrap(~lat_floor, scales = "free_y")
+  # ggpatchlength  
+  ggsave(ggpatchlength, filename=here("results","summer_flounder_length_freq_by_patch.png"), height=8, width=5, dpi=160)
+  # not sure this doesn't have any data in the other patches, maybe they are missing years? 
+}
 
 ##########
 # prep data for fitting
@@ -111,15 +123,21 @@ dat_train_sbt <- dat %>%
 loo = 83.6
 k = 0.14
 m = 0.25
-f = 0.334
-z = exp(-m-f)
+#f = 0.334
+#z = exp(-m-f)
 age_at_maturity = 2
 t0=-.2
 cv= 0.2 # guess
 min_age = 0
 max_age = 20
 
+# now that we have the max_age, fill in f for years above 7 (since the f for age=7 is really for 7+)
+older_ages <- expand_grid(age=seq(max(dat_f_age$age)+1, max_age, 1), year= unique(dat_f_age$year)) %>% 
+  left_join(dat_f_age %>% filter(age==max(age)) %>% select(year, f))
 
+dat_f_age %<>% bind_rows(older_ages)
+
+# make length to age conversions
 length_at_age_key <-
   generate_length_at_age_key(
     min_age = min_age,
@@ -150,6 +168,7 @@ l_at_a_mat <- length_at_age_key %>%
 years <- sort(unique(dat_train_lengths$year)) 
 ny <- length(years)
 ny_proj <- 10
+dat_f_age %<>% filter(year %in% years) 
 
 #get other dimensions
 patches <- sort(unique(dat_train_lengths$lat_floor))
@@ -162,9 +181,11 @@ n_lbins <- length(lbins)
 n_ages <- nrow(l_at_a_mat)
 
 # now that years are defined above, convert them into indices in the datasets
+# be sure all these dataframes have exactly the same year range! 
 dat_train_dens$year = as.integer(as.factor(dat_train_dens$year))
 dat_train_lengths$year = as.integer(as.factor(dat_train_lengths$year))
 dat_train_sbt$year= as.integer(as.factor(dat_train_sbt$year))
+dat_f_age$year = as.integer(as.factor(dat_f_age$year))
 
 # make matrices/arrays from dfs
 len <- array(0, dim = c(np, n_lbins, ny)) 
@@ -173,7 +194,7 @@ for(p in 1:np){
     for(y in 1:ny){
       tmp <- dat_train_lengths %>% filter(patch==p, round(length)==lbins[l], year==y) 
       if (nrow(tmp) > 0){
-      len[p,l,y] <- tmp$sum_num_at_length
+        len[p,l,y] <- tmp$sum_num_at_length
       }
     }
   }
@@ -199,6 +220,14 @@ for(p in 1:np){
   }
 }
 
+f <- array(NA, dim=c(n_ages,ny))
+for(a in min_age:max_age){
+  for(y in 1:ny){
+    tmp4 <- dat_f_age %>% filter(age==a, year==y) 
+    f[a+1,y] <- tmp4$f # add 1 because matrix indexing starts at 1 not 0
+  }
+}
+
 a <- seq(min_age, max_age)
 
 check <- a %*% l_at_a_mat
@@ -215,6 +244,7 @@ stan_data <- list(
   abund_p_y = dens,
   sbt = sbt,
   m=m,
+  f=f,
   k=k,
   loo=loo,
   t0=t0,
@@ -237,16 +267,16 @@ max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
 stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!
-                      data = stan_data,
-                      chains = n_chains,
-                      warmup = warmups,
-                      init = list(list(log_mean_recruits = rep(log(1000), np),
-                                       theta_d = 1)),
-                      iter = total_iterations,
-                      cores = n_cores,
-                      refresh = 250,
-                      control = list(max_treedepth = max_treedepth,
-                                     adapt_delta = 0.85)
+                       data = stan_data,
+                       chains = n_chains,
+                       warmup = warmups,
+                       init = list(list(log_mean_recruits = rep(log(1000), np),
+                                        theta_d = 1)),
+                       iter = total_iterations,
+                       cores = n_cores,
+                       refresh = 250,
+                       control = list(max_treedepth = max_treedepth,
+                                      adapt_delta = 0.85)
 )
 
 a = rstan::extract(stan_model_fit, "theta_d")
@@ -261,7 +291,7 @@ abund_p_y <- dat_train_dens %>%
   group_by(patch, year) %>% 
   summarise(abundance = sum(mean_dens *patch_area_km2)) %>% 
   ungroup()
-  
+
 
 abund_p_y_hat <- tidybayes::spread_draws(stan_model_fit, dens_p_y_hat[patch,year])
 

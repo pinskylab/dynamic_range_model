@@ -69,6 +69,8 @@ data {
   
   real cv;
   
+  real f[n_ages, ny_train]; 
+  
   real length_50_sel_guess;
   
   vector<lower=0>[n_lbins] bin_mids;
@@ -84,6 +86,16 @@ data {
 }
 
 transformed data{
+  
+  // calculate total annual mortality from instantaneous natural + fishing mortality data 
+  // note that z is the proportion that survive, 1-z is the proportion that die 
+  real z[n_ages, ny_train];
+  
+  for(a in 1:n_ages){
+    for(y in 1:ny_train){
+        z[a,y] = exp(-(f[a,y] + m));
+    }
+  }
   
   // matrix[n_lbins, n_ages] prob_age_at_length;
   
@@ -182,9 +194,7 @@ transformed parameters{
   
   // real scalar = exp(log_scalar);
   
-  real f = exp(log_f);
-  
-  real z = exp(-(f + m));
+//  real f = exp(log_f);
   
   real alpha = 0;
   
@@ -221,7 +231,7 @@ transformed parameters{
         n_p_a_y_hat[p,a,1] = mean_recruits[p] * T_adjust[p,1] * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
       }
       else{
-        n_p_a_y_hat[p,a,1] = n_p_a_y_hat[p,a-1,1] * z; // initialize population with mean recruitment propogated through age classes with mortality
+        n_p_a_y_hat[p,a,1] = n_p_a_y_hat[p,a-1,1] * z[a-1,1]; // initialize population with mean recruitment propogated through age classes with mortality
       }
       
     } // close ages
@@ -258,7 +268,7 @@ transformed parameters{
       if(age_at_maturity > 1){ // confirm that there are non-reproductive age classes above 1
       for(a in 2:(age_at_maturity-1)){
         
-        n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z; // these just grow and die in the patch
+        n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[a-1,y-1]; // these just grow and die in the patch
         
       } // close ages for 2 to age at maturity
       } // close if 
@@ -271,15 +281,15 @@ transformed parameters{
         
         // edge cases -- edges are reflecting
         if(p==1){
-          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z * (1-d) + n_p_a_y_hat[p+1, a-1, y-1] * z * d;
+          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[a-1,y-1] * (1-d) + n_p_a_y_hat[p+1, a-1, y-1] * z[a-1,y-1] * d;
         } // close patch 1 case 
         
         else if(p==np){
-          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z * (1-d) + n_p_a_y_hat[p-1, a-1, y-1] * z * d;
+          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[a-1,y-1] * (1-d) + n_p_a_y_hat[p-1, a-1, y-1] * z[a-1,y-1] * d;
         } // close highest patch
         
         else{
-          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z * (1-2*d) + n_p_a_y_hat[p-1, a-1, y-1] * z * d + n_p_a_y_hat[p+1, a-1, y-1] * z * d;
+          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[a-1,y-1] * (1-2*d) + n_p_a_y_hat[p-1, a-1, y-1] * z[a-1,y-1] * d + n_p_a_y_hat[p+1, a-1, y-1] * z[a-1,y-1] * d;
           
         } // close if/else for all other patches
         
