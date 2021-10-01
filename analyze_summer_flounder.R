@@ -279,10 +279,17 @@ stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that
                                       adapt_delta = 0.85)
 )
 
-a = rstan::extract(stan_model_fit, "theta_d")
+# a = rstan::extract(stan_model_fit, "theta_d")
 # write_rds(stan_model_fit,"sigh.rds")
 # hist(a$sigma_obs)
 # rstanarm::launch_shinystan(stan_model_fit)
+
+
+# plot important parameters 
+plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','alpha','beta_obs','theta_d','log_f'))
+#Topt going to about 20, width to about 8; zoom in on the others
+plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','alpha','beta_obs','theta_d','log_f'))
+
 
 # assess abundance fits
 
@@ -299,7 +306,8 @@ abund_p_y_hat %>%
   ggplot(aes(year, dens_p_y_hat)) + 
   stat_lineribbon() + 
   geom_point(data = abund_p_y, aes(year, abundance), color = "red") +
-  facet_wrap(~patch, scales = "free_y")
+  facet_wrap(~patch, scales = "free_y") +
+  scale_fill_brewer()
 
 # assess length comp fits
 
@@ -330,11 +338,6 @@ n_p_l_y_hat %>%
   stat_lineribbon() + 
   geom_point(data = dat_train_lengths %>% filter(patch == p), aes(length,p_length), color = "red", alpha = 0.2) +
   facet_wrap(~year, scales = "free_y")
-
-# plot important parameters 
-plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','alpha','theta','theta_d','log_f'))
-#Topt going to about 20, width to about 8; zoom in on the others
-plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','alpha','theta','theta_d','log_f'))
 
 
 # save model run if desired

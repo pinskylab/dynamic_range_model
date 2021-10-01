@@ -152,7 +152,10 @@ parameters{
 
   real<upper = 0.8> p_length_50_sel; // length at 50% selectivity
   
-  real<lower=0, upper=1> theta; // Bernoulli parameter for encounter probability
+//  real<lower=0, upper=1> theta; // Bernoulli parameter for encounter probability
+
+
+real<lower=0, upper=1> beta_obs; // controls how fast detection goes up with abundance
   
   real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
   
@@ -177,6 +180,8 @@ transformed parameters{
   real sel_delta;
   
   vector[np] mean_recruits;
+  
+  matrix<lower=0, upper=1> [np, ny_train] theta; // Bernoulli probability of encounter  
   
   real n_p_a_y_hat [np, n_ages,ny_train]; // array of numbers at patch, stage, and year 
   
@@ -309,6 +314,9 @@ transformed parameters{
       
       dens_p_y_hat[p,y] = sum((to_vector(n_p_l_y_hat[y,p,1:n_lbins])));
       
+        theta[p,y] = 1/(1+exp(-beta_obs*dens_p_y_hat[p,y]));
+
+      
     }
   }
   
@@ -327,8 +335,9 @@ model {
   
   real test;
   
+  beta_obs ~ normal(0.05,0.1); 
   
-  theta ~ uniform(0, 1); // Bernoulli probability of encounter
+ // theta ~ uniform(0, 1); // Bernoulli probability of encounter
   
   
   log_f ~ normal(log(m / 2),.5);
@@ -401,12 +410,12 @@ model {
         
         log(abund_p_y[p,y]) ~ normal(log( dens_p_y_hat[p,y] + 1e-6), sigma_obs); 
         
-        1 ~ bernoulli(theta);
+        1 ~ bernoulli(theta[p,y]);
         
         
       } else { // only evaluate length comps if there are length comps to evaluate
       
-      0 ~ bernoulli(theta);
+      0 ~ bernoulli(theta[p,y]);
       
       } // close else 
     } // close patch loop
