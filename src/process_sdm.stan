@@ -51,7 +51,7 @@ data {
   
   matrix[n_ages, n_lbins] l_at_a_key;
  
-  real abund_p_y[np, ny_train]; // MEAN density of individuals of any age in each haul; used for rescaling the abundance to fit to our data
+  real abund_p_y[np, ny_train]; // MEAN density of individuals of any age in each haul, SCALED TO PATCH; used for rescaling the abundance to fit to our data
   
   // environmental data 
   
@@ -155,11 +155,11 @@ parameters{
 //  real<lower=0, upper=1> theta; // Bernoulli parameter for encounter probability
 
 
-real<lower=0, upper=1> beta_obs; // controls how fast detection goes up with abundance
+real<lower=0> beta_obs; // controls how fast detection goes up with abundance
   
   real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
   
-  real<upper = log(0.6)> log_f;
+ // real<upper = log(0.6)> log_f;
   // real log_scalar;
   
   real <lower = 0> theta_d;
@@ -314,8 +314,8 @@ transformed parameters{
       
       dens_p_y_hat[p,y] = sum((to_vector(n_p_l_y_hat[y,p,1:n_lbins])));
       
-        theta[p,y] = 1/(1+exp(-beta_obs*dens_p_y_hat[p,y]));
-
+        theta[p,y] = exp(-1/(beta_obs*dens_p_y_hat[p,y]/patcharea[p]));
+// subtracting 0.5 and multiplying by 2 is a hacky way to get theta[0,1]
       
     }
   }
@@ -335,12 +335,12 @@ model {
   
   real test;
   
-  beta_obs ~ normal(0.05,0.1); 
+  beta_obs ~ normal(0.5,1); 
   
  // theta ~ uniform(0, 1); // Bernoulli probability of encounter
   
   
-  log_f ~ normal(log(m / 2),.5);
+//  log_f ~ normal(log(m / 2),.5);
   
   log_mean_recruits ~ normal(7,5);
   

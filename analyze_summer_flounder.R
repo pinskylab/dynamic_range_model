@@ -28,7 +28,6 @@ dat_f_age <- bind_rows(dat_f_age, f_early)
 make_data_plots <- FALSE
 
 if(make_data_plots==TRUE){
-  
   # how much variation is there in length frequency over time?
   gglength <- dat %>% 
     mutate(lat_floor = floor(lat)) %>% 
@@ -172,6 +171,7 @@ dat_f_age %<>% filter(year %in% years)
 
 #get other dimensions
 patches <- sort(unique(dat_train_lengths$lat_floor))
+patcharea <- patchdat %>% arrange(patch) %>% pull(patch_area_km2)
 np = length(patches) 
 
 lbins <- unique(length_at_age_key$length_bin)
@@ -255,7 +255,7 @@ stan_data <- list(
   bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
   sel_100 = 3, # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
   age_at_maturity = age_at_maturity,
-  patcharea = patchdat$patch_area_km2,
+  patcharea = patcharea,
   l_at_a_key = l_at_a_mat,
   do_dirichlet = 1
   
@@ -286,9 +286,9 @@ stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that
 
 
 # plot important parameters 
-plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','alpha','beta_obs','theta_d','log_f'))
+plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','alpha','beta_obs','theta_d'))
 #Topt going to about 20, width to about 8; zoom in on the others
-plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','alpha','beta_obs','theta_d','log_f'))
+plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','alpha','beta_obs','theta_d'))
 
 
 # assess abundance fits
@@ -339,6 +339,15 @@ n_p_l_y_hat %>%
   geom_point(data = dat_train_lengths %>% filter(patch == p), aes(length,p_length), color = "red", alpha = 0.2) +
   facet_wrap(~year, scales = "free_y")
 
+# detection stats 
+spread_draws(stan_model_fit, theta[patch,year]) %>% 
+  ggplot(aes(x=year, y=theta)) + 
+  stat_lineribbon() + 
+  facet_wrap(~patch) +
+  scale_fill_brewer()
+
+beta_obs <- extract(stan_model_fit, "beta_obs")$beta_obs
+hist(beta_obs)
 
 # save model run if desired
 saveRDS(stan_model_fit, here("results","summer_flounder_stan_fit.rds"))
