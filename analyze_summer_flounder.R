@@ -339,6 +339,42 @@ n_p_l_y_hat %>%
   geom_point(data = dat_train_lengths %>% filter(patch == p), aes(length,p_length), color = "red", alpha = 0.2) +
   facet_wrap(~year, scales = "free_y")
 
+
+# is there a temperature - recruitment relationship? 
+
+## first need to figure out which lengths correspond to age 0 
+length_at_age_key %>% 
+  ggplot(aes(x=length_bin, y=p_bin)) +
+  geom_line() + 
+  facet_wrap(~age)
+
+## let's call recruits <5cm
+
+selectivity_at_bin <- gather_draws(stan_model_fit, selectivity_at_bin[n_lbins], n=500)
+
+mean_sel <- selectivity_at_bin %>% 
+  group_by(n_lbins) %>% 
+  summarise(mean_sel = mean(.value)) %>% 
+  rename(length = n_lbins)
+
+# get proportion of recruits adjusted by selectivity
+recruits <- n_p_l_y_hat %>% 
+  left_join(mean_sel, by="length") %>% 
+  mutate(recruit = ifelse(length <=5, "yes", "no"),
+         val_post_sel = .value / mean_sel) %>% 
+  group_by(recruit, patch, year, .draw) %>% 
+  summarise(sumcount = sum(val_post_sel)) %>% 
+  ungroup() %>% 
+  group_by(patch, year, .draw) %>% 
+  mutate(prop_recruit = sumcount / sum(sumcount)) %>% 
+  filter(recruit == "yes")
+
+recruits %>% group_by(patch, year) %>% 
+  mutate(mean_prop_rec = mean(prop_recruit)) %>% 
+  left_join(dat_train_sbt, by=c('patch','year')) %>% 
+  ggplot(aes(x=sbt, y=mean_prop_rec, color=year, fill=year)) +
+  geom_point()
+
 # detection stats 
 spread_draws(stan_model_fit, theta[patch,year]) %>% 
   ggplot(aes(x=year, y=theta)) + 
