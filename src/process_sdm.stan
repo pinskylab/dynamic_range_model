@@ -51,7 +51,7 @@ data {
   
   matrix[n_ages, n_lbins] l_at_a_key;
  
-  real abund_p_y[np, ny_train]; // MEAN density of individuals of any age in each haul, SCALED TO PATCH; used for rescaling the abundance to fit to our data
+  real abund_p_y[np, ny_train]; // MEAN density of individuals of any age in each haul; used for rescaling the abundance to fit to our data
   
   // environmental data 
   
@@ -144,10 +144,10 @@ parameters{
     
   // real<lower = -1, upper = 1> alpha; // autocorrelation term
   
-  // real  log_mean_recruits; // log mean recruits per patch, changed to one value for all space/time
+   real  log_mean_recruits; // log mean recruits per patch, changed to one value for all space/time
   
-  vector[np] log_mean_recruits;
-  
+//  vector[np] log_mean_recruits;
+
   vector[ny_train] raw; // array of raw recruitment deviates, changed to one value per year
 
   real<upper = 0.8> p_length_50_sel; // length at 50% selectivity
@@ -155,7 +155,7 @@ parameters{
 //  real<lower=0, upper=1> theta; // Bernoulli parameter for encounter probability
 
 
-real<lower=0> beta_obs; // controls how fast detection goes up with abundance
+real<lower=0, upper=1> beta_obs; // controls how fast detection goes up with abundance
   
   real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
   
@@ -179,7 +179,8 @@ transformed parameters{
   
   real sel_delta;
   
-  vector[np] mean_recruits;
+ // vector[np] mean_recruits;
+ real mean_recruits;
   
   matrix<lower=0, upper=1> [np, ny_train] theta; // Bernoulli probability of encounter  
   
@@ -233,7 +234,9 @@ transformed parameters{
   for(p in 1:np){
     for(a in 1:n_ages){
       if(a==1){
-        n_p_a_y_hat[p,a,1] = mean_recruits[p] * T_adjust[p,1] * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
+       // n_p_a_y_hat[p,a,1] = mean_recruits[p] * T_adjust[p,1] * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
+              n_p_a_y_hat[p,a,1] = mean_recruits * T_adjust[p,1] * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
+
       }
       else{
         n_p_a_y_hat[p,a,1] = n_p_a_y_hat[p,a-1,1] * z[a-1,1]; // initialize population with mean recruitment propogated through age classes with mortality
@@ -259,7 +262,10 @@ transformed parameters{
     for(p in 1:np){
       
       // density-independent, temperature-dependent recruitment of age 1
-      n_p_a_y_hat[p,1,y] = mean_recruits[p] * exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1];
+    //  n_p_a_y_hat[p,1,y] = mean_recruits[p] * exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1];
+            n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1];
+
+      
       // why estimate raw and sigma_r? we want to estimate process error
       // if we got rid of sigma_r, we would be saying that raw could be anything
       // that means raw could pick any value, and it would pick deviates to perfectly match abundance index
@@ -314,7 +320,7 @@ transformed parameters{
       
       dens_p_y_hat[p,y] = sum((to_vector(n_p_l_y_hat[y,p,1:n_lbins])));
       
-        theta[p,y] = exp(-1/(beta_obs*dens_p_y_hat[p,y]/patcharea[p]));
+        theta[p,y] = ((1/(1+exp(-beta_obs*dens_p_y_hat[p,y]))) - 0.5)*2;
 // subtracting 0.5 and multiplying by 2 is a hacky way to get theta[0,1]
       
     }
@@ -335,12 +341,12 @@ model {
   
   real test;
   
-  beta_obs ~ normal(0.5,1); 
+  beta_obs ~ normal(0.05,0.1); 
   
  // theta ~ uniform(0, 1); // Bernoulli probability of encounter
   
   
-//  log_f ~ normal(log(m / 2),.5);
+ // log_f ~ normal(log(m / 2),.5);
   
   log_mean_recruits ~ normal(7,5);
   

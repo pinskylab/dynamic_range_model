@@ -270,7 +270,7 @@ stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that
                        data = stan_data,
                        chains = n_chains,
                        warmup = warmups,
-                       init = list(list(log_mean_recruits = rep(log(1000), np),
+                       init = list(list(log_mean_recruits = log(1000),
                                         theta_d = 1)),
                        iter = total_iterations,
                        cores = n_cores,
@@ -292,6 +292,8 @@ plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','alpha','beta_obs','theta_
 
 
 # assess abundance fits
+
+hist(extract(stan_model_fit, "mean_recruits")$mean_recruits)
 
 abund_p_y <- dat_train_dens %>%
   left_join(patchdat, by = c("lat_floor", "patch")) %>% 
