@@ -287,7 +287,6 @@ stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that
 
 # plot important parameters 
 plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','alpha','beta_obs','theta_d'))
-#Topt going to about 20, width to about 8; zoom in on the others
 plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','alpha','beta_obs','theta_d'))
 
 
@@ -341,6 +340,14 @@ n_p_l_y_hat %>%
   geom_point(data = dat_train_lengths %>% filter(patch == p), aes(length,p_length), color = "red", alpha = 0.2) +
   facet_wrap(~year, scales = "free_y")
 
+# length frequency over time
+l_freq_time <- n_p_l_y_hat %>% 
+  ungroup() %>% 
+  ggplot(aes(x=length, y=..density.., weight=.value)) + 
+  geom_histogram(bins=50) +
+  facet_grid(patch~year)
+
+ggsave(l_freq_time, filename=here("results","length_freq_time_flounder.png"), scale=1.5, width=15, height=4)
 
 # is there a temperature - recruitment relationship? 
 
@@ -376,6 +383,37 @@ recruits %>% group_by(patch, year) %>%
   left_join(dat_train_sbt, by=c('patch','year')) %>% 
   ggplot(aes(x=sbt, y=mean_prop_rec, color=year, fill=year)) +
   geom_point()
+
+# plot recruitment deviates
+# note that the length of rec_dev is actually 34 not 35
+gather_draws(stan_model_fit, rec_dev[ny]) %>% 
+  ggplot(aes(x=ny, y=.value)) + 
+  stat_lineribbon() + 
+  scale_fill_brewer()
+
+# plot raw
+raw_v_time <- gather_draws(stan_model_fit, raw[ny]) %>%
+  ggplot(aes(x=ny, y=.value)) + 
+  stat_lineribbon() + 
+  scale_fill_brewer()
+ggsave(raw_v_time, filename=here("results","raw_v_time.png"))
+
+# plot actual recruitment
+n_p_a_y_hat <- gather_draws(stan_model_fit, n_p_a_y_hat[np, n_ages, ny])
+
+n_p_a_y_hat %>%
+  filter(n_ages==1) %>%
+  ggplot(aes(x=ny, y=.value)) +
+  stat_lineribbon() +
+  scale_fill_brewer() +
+  facet_wrap(~np)
+
+# plot all ages over time
+n_p_a_y_hat %>% 
+  ggplot(aes(x=ny, y=.value)) +
+  stat_lineribbon() +
+  scale_fill_brewer() +
+  facet_grid(np~n_ages)
 
 # detection stats 
 spread_draws(stan_model_fit, theta[patch,year]) %>% 
@@ -459,8 +497,15 @@ dat_train_lengths %>%
 dat_train_lengths %>% 
   ggplot(aes(x=year, y=sum_num_at_length, fill=length)) + 
   geom_bar(position="fill", stat="identity") +
-  facet_wrap(~patch) +
-  scale_fill_viridis_c() +
-  theme_bw()
+scale_fill_viridis_c() +
+  theme_bw()  
 
+# plot temperature difference from optimum over space and time
+Topt <- extract(stan_model_fit, "Topt")$Topt
+hist(Topt) # note, not normally distributed
 
+dat_train_sbt %>%
+  mutate(Tdiff = sbt - median(Topt)) %>%
+  ggplot(aes(x=year, y=patch, fill=Tdiff)) +
+  geom_tile() + 
+  scale_fill_gradient2(low="blue", high="red", mid="white", midpoint=0)
