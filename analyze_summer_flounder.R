@@ -10,6 +10,7 @@ library(ggridges)
 library(rstanarm)
 library(geosphere)
 library(ggridges)
+library(purrr)
 
 funs <- list.files("functions")
 sapply(funs, function(x) source(file.path("functions",x)))
@@ -17,13 +18,14 @@ sapply(funs, function(x) source(file.path("functions",x)))
 rstan_options(javascript=FALSE, auto_write =TRUE)
 
 dat <- read_csv(here("processed-data","flounder_catch_at_length_fall_training.csv"))
+dat_test <- read_csv(here("processed-data","flounder_catch_at_length_fall_testing.csv"))
 
 # the f-at-age data starts in 1982; fill in the previous years with the earliest year of data
-dat_f_age <- read_csv(here("processed-data","summer_flounder_F_by_age.csv")) %>%
+dat_f_age_prep <- read_csv(here("processed-data","summer_flounder_F_by_age.csv")) %>%
   rename_with(str_to_lower)
-f_early <- expand_grid(year=seq(1972, 1981, 1), age=unique(dat_f_age$age)) %>% 
-  left_join(dat_f_age %>% filter(year==1982) %>% select(age, f)) 
-dat_f_age <- bind_rows(dat_f_age, f_early)
+f_early <- expand_grid(year=seq(1972, 1981, 1), age=unique(dat_f_age_prep$age)) %>% 
+  left_join(dat_f_age_prep %>% filter(year==1982) %>% select(age, f)) 
+dat_f_age_prep <- bind_rows(dat_f_age_prep, f_early)
 
 make_data_plots <- FALSE
 
@@ -84,7 +86,25 @@ dat_train_lengths <- dat %>%
   ungroup() %>% 
   mutate(patch = as.integer(as.factor(lat_floor)))
 
+dat_test_lengths <- dat_test %>% 
+  mutate(lat_floor = floor(lat)) %>% 
+  group_by(length, year, lat_floor) %>% 
+  summarise(sum_num_at_length = sum(number_at_length)) %>% 
+  filter(lat_floor %in% top_patches$lat_floor)%>% 
+  ungroup() %>% 
+  mutate(patch = as.integer(as.factor(lat_floor)))
+
 dat_train_dens <- dat %>% 
+  mutate(lat_floor = floor(lat)) %>% 
+  filter(lat_floor %in% top_patches$lat_floor) %>% 
+  group_by(haulid) %>% 
+  mutate(dens = sum(number_at_length)) %>% # get total no. fish in each haul, of any size
+  group_by(year, lat_floor) %>% 
+  summarise(mean_dens = mean(dens)) %>%  # get mean density (all sizes) / haul for the patch*year combo 
+  ungroup() %>% 
+  mutate(patch = as.integer(as.factor(lat_floor)))
+
+dat_test_dens <- dat_test %>% 
   mutate(lat_floor = floor(lat)) %>% 
   filter(lat_floor %in% top_patches$lat_floor) %>% 
   group_by(haulid) %>% 
@@ -118,6 +138,29 @@ dat_train_sbt <- dat %>%
   filter(lat_floor %in% top_patches$lat_floor)%>% 
   mutate(patch = as.integer(as.factor(lat_floor)))
 
+dat_test_sbt <- dat_test %>%   
+  mutate(lat_floor = floor(lat)) %>% 
+  group_by(lat_floor, year) %>% 
+  summarise(sbt = mean(btemp, na.rm=TRUE)) %>% 
+  ungroup() %>% 
+  filter(lat_floor %in% top_patches$lat_floor)%>% 
+  mutate(patch = as.integer(as.factor(lat_floor))) %>% 
+  filter(!is.na(sbt))
+
+# some SBT data are missing: lat 35, 36, and 37 in 2008
+# THIS IS VERY HARD CODED! DANGER
+library(lme4)
+sbt_lme <- lmer(btemp ~ lat + (1|year), data=bind_rows(dat, dat_test))
+sbt_test_fill <- data.frame(
+  lat_floor = c(35, 36, 37),
+  year = rep(2008, 3),
+  patch = c(1,2,3),
+  sbt = c(predict(sbt_lme, newdata=data.frame(lat=35.5, year=2008)),
+          predict(sbt_lme, newdata=data.frame(lat=36.5, year=2008)),
+          predict(sbt_lme, newdata=data.frame(lat=35.5, year=2008))
+  ))
+dat_test_sbt <- bind_rows(dat_test_sbt, sbt_test_fill)
+
 # set fixed parameters from stock assessment
 loo = 83.6
 k = 0.14
@@ -131,10 +174,10 @@ min_age = 0
 max_age = 20
 
 # now that we have the max_age, fill in f for years above 7 (since the f for age=7 is really for 7+)
-older_ages <- expand_grid(age=seq(max(dat_f_age$age)+1, max_age, 1), year= unique(dat_f_age$year)) %>% 
-  left_join(dat_f_age %>% filter(age==max(age)) %>% select(year, f))
+older_ages <- expand_grid(age=seq(max(dat_f_age_prep$age)+1, max_age, 1), year= unique(dat_f_age_prep$year)) %>% 
+  left_join(dat_f_age_prep %>% filter(age==max(age)) %>% select(year, f))
 
-dat_f_age %<>% bind_rows(older_ages)
+dat_f_age_prep %<>% bind_rows(older_ages)
 
 # make length to age conversions
 length_at_age_key <-
@@ -165,9 +208,15 @@ l_at_a_mat <- length_at_age_key %>%
 
 # get time dimension
 years <- sort(unique(dat_train_lengths$year)) 
+years_proj <- sort(unique(dat_test_lengths$year))
 ny <- length(years)
-ny_proj <- 10
-dat_f_age %<>% filter(year %in% years) 
+ny_proj <- length(years_proj)
+dat_f_age <- dat_f_age_prep %>% 
+  filter(year %in% years) 
+
+dat_f_age_proj <- dat_f_age_prep %>% 
+  filter(year %in% years_proj) %>%
+  bind_rows(dat_f_age %>% filter(year==max(year))) # need final year of training data to initialize projection
 
 #get other dimensions
 patches <- sort(unique(dat_train_lengths$lat_floor))
@@ -182,10 +231,15 @@ n_ages <- nrow(l_at_a_mat)
 
 # now that years are defined above, convert them into indices in the datasets
 # be sure all these dataframes have exactly the same year range! 
+
 dat_train_dens$year = as.integer(as.factor(dat_train_dens$year))
+dat_test_dens$year = as.integer(as.factor(dat_test_dens$year))
 dat_train_lengths$year = as.integer(as.factor(dat_train_lengths$year))
+#dat_test_lengths$year = as.integer(as.factor(dat_test_lengths$year))
+dat_test_sbt$year= as.integer(as.factor(dat_test_sbt$year))
 dat_train_sbt$year= as.integer(as.factor(dat_train_sbt$year))
 dat_f_age$year = as.integer(as.factor(dat_f_age$year))
+dat_f_age_proj$year = as.integer(as.factor(dat_f_age_proj$year))
 
 # make matrices/arrays from dfs
 len <- array(0, dim = c(np, n_lbins, ny)) 
@@ -220,11 +274,27 @@ for(p in 1:np){
   }
 }
 
+sbt_proj <- array(NA, dim=c(np,ny_proj))
+for(p in 1:np){
+  for(y in 1:ny_proj){
+    tmp6 <- dat_test_sbt %>% filter(patch==p, year==y) 
+    sbt_proj[p,y] <- tmp6$sbt
+  }
+}
+
+
 f <- array(NA, dim=c(n_ages,ny))
 for(a in min_age:max_age){
   for(y in 1:ny){
     tmp4 <- dat_f_age %>% filter(age==a, year==y) 
     f[a+1,y] <- tmp4$f # add 1 because matrix indexing starts at 1 not 0
+  }
+}
+f_proj <- array(NA, dim=c(n_ages,(ny_proj+1)))
+for(a in min_age:max_age){
+  for(y in 1:(ny_proj+1)){
+    tmp5 <- dat_f_age_proj %>% filter(age==a, year==y) 
+    f_proj[a+1,y] <- tmp5$f # add 1 because matrix indexing starts at 1 not 0
   }
 }
 
@@ -239,12 +309,15 @@ stan_data <- list(
   np=np,
   n_ages=n_ages,
   ny_train=ny,
+  ny_proj=ny_proj,
   n_lbins=n_lbins,
   n_p_l_y = len,
   abund_p_y = dens,
   sbt = sbt,
+  sbt_proj=sbt_proj,
   m=m,
   f=f,
+  f_proj=f_proj,
   k=k,
   loo=loo,
   t0=t0,
@@ -303,12 +376,14 @@ abund_p_y <- dat_train_dens %>%
 
 abund_p_y_hat <- tidybayes::spread_draws(stan_model_fit, dens_p_y_hat[patch,year])
 
-abund_p_y_hat %>% 
+abundance_v_time <- abund_p_y_hat %>% 
   ggplot(aes(year, dens_p_y_hat)) + 
   stat_lineribbon() + 
   geom_point(data = abund_p_y, aes(year, abundance), color = "red") +
   facet_wrap(~patch, scales = "free_y") +
+  labs(x="Year",y="Abundance") + 
   scale_fill_brewer()
+ggsave(abundance_v_time, filename=here("results","density_v_time.png"), width=7, height=4)
 
 # assess length comp fits
 
@@ -415,6 +490,12 @@ n_p_a_y_hat %>%
   scale_fill_brewer() +
   facet_grid(np~n_ages)
 
+proj_n_p_a_y_hat %>% 
+  ggplot(aes(x=`(ny_proj + 1)`, y=.value)) +
+  stat_lineribbon() +
+  scale_fill_brewer() +
+  facet_grid(np~n_ages)
+
 # detection stats 
 spread_draws(stan_model_fit, theta[patch,year]) %>% 
   ggplot(aes(x=year, y=theta)) + 
@@ -439,15 +520,17 @@ dat_centroid <- abund_p_y %>%
 
 # model fit centroid -- should eventually estimate in model for proper SE -- just exploring here
 est_centroid <- abund_p_y_hat %>% 
-  group_by(year, .draw) %>%  # IS THIS SUPPOSED TO BE .ITERATION? CHECK WHEN MODEL IS RUN FOR LONGER 
+  group_by(year, .iteration) %>%  # IS THIS SUPPOSED TO BE .ITERATION? CHECK WHEN MODEL IS RUN FOR LONGER 
   summarise(centroid_lat = weighted.mean(x=patch, w=dens_p_y_hat)) %>% 
   ungroup()
 
-est_centroid %>% 
+gg_centroid <- est_centroid %>% 
   ggplot(aes(year, centroid_lat)) + 
   stat_lineribbon() + 
   scale_fill_brewer() +
-  geom_point(data = dat_centroid, aes(year, centroid_lat), color = "red") 
+  geom_point(data = dat_centroid, aes(year, centroid_lat), color = "red") +
+  theme(legend.position = "none")
+ggsave(gg_centroid, filename=here("results","centroid_v_time.png"))
 
 # centroid didn't shift at all!
 
@@ -456,7 +539,7 @@ est_patch_abund <- abund_p_y_hat %>%
   group_by(year, patch) %>% 
   summarise(abundance = mean(dens_p_y_hat))
 
-abund_p_y %>% 
+observed_abundance_tile <- abund_p_y %>% 
   ggplot(aes(x=year, y=patch, fill=abundance)) +
   geom_tile() +
   theme_bw() +
@@ -465,13 +548,16 @@ abund_p_y %>%
   labs(title="Observed")
 
 
-est_patch_abund %>% 
+estimated_abundance_tile <- est_patch_abund %>% 
   ggplot(aes(x=year, y=patch, fill=abundance)) +
   geom_tile() +
   theme_bw() +
   scale_x_continuous(breaks=seq(0, 36, 4)) +
   scale_y_continuous(breaks=seq(1, 7, 1)) +
   labs(title="Estimated")
+
+ggsave(observed_abundance_tile, filename=here("results","observed_abundance_v_time_tileplot.png"))
+ggsave(estimated_abundance_tile, filename=here("results","estimated_abundance_v_time_tileplot.png"))
 
 # who's doing the colonizing?
 dat_train_lengths %>% 
@@ -509,3 +595,48 @@ dat_train_sbt %>%
   ggplot(aes(x=year, y=patch, fill=Tdiff)) +
   geom_tile() + 
   scale_fill_gradient2(low="blue", high="red", mid="white", midpoint=0)
+
+########
+# evaluate forecast
+########
+proj_dens_p_y_hat <- spread_draws(stan_model_fit, proj_dens_p_y_hat[np, ny_proj])
+
+proj_abund_p_y <- dat_test_dens %>%
+  left_join(patchdat, by = c("lat_floor", "patch")) %>% 
+  group_by(patch, year) %>% 
+  summarise(abundance = sum(mean_dens *patch_area_km2)) %>% 
+  ungroup()
+
+proj_observed_abundance_tile <- proj_abund_p_y %>% 
+  ggplot(aes(x=year, y=patch, fill=abundance)) +
+  geom_tile() +
+  theme_bw() +
+  scale_x_continuous(breaks=seq(0, 10, 2)) +
+  scale_y_continuous(breaks=seq(1, 7, 1)) +
+  labs(title="Observed")
+
+
+proj_est_patch_abund <- proj_dens_p_y_hat %>% 
+  group_by(ny_proj, np) %>% 
+  summarise(abundance = mean(proj_dens_p_y_hat))
+
+proj_estimated_abundance_tile <- proj_est_patch_abund %>% 
+  ggplot(aes(x=ny_proj, y=np, fill=abundance)) +
+  geom_tile() +
+  theme_bw() +
+  scale_x_continuous(breaks=seq(0, 10, 2)) +
+  scale_y_continuous(breaks=seq(1, 7, 1)) +
+  labs(title="Estimated", x="year", y="patch")
+ggsave(proj_estimated_abundance_tile, filename=here("results","proj_estimated_abundance_v_time_tileplot.png"))
+ggsave(proj_observed_abundance_tile, filename=here("results","proj_observed_abundance_v_time_tileplot.png"))
+
+proj_abundance_v_time <- proj_dens_p_y_hat %>% 
+  ggplot(aes(ny_proj, proj_dens_p_y_hat)) + 
+  stat_lineribbon() + 
+  geom_point(data = proj_abund_p_y, aes(year, abundance), color = "red") +
+  facet_wrap(~patch, scales = "free_y") +
+  labs(x="Year",y="Abundance") + 
+  scale_x_continuous(breaks=seq(0, 10, 2), limits=c(0, 10)) +
+  theme(legend.position="none") +
+  scale_fill_brewer()
+ggsave(proj_abundance_v_time, filename=here("results","proj_density_v_time.png"), width=7, height=4)
