@@ -330,7 +330,9 @@ stan_data <- list(
   age_at_maturity = age_at_maturity,
   patcharea = patcharea,
   l_at_a_key = l_at_a_mat,
-  do_dirichlet = 1
+  do_dirichlet = 1,
+  T_dep_mortality = 1,
+  T_dep_recruitment = 0 # think carefully before making more than one of these true
   
 )
 
