@@ -47,8 +47,6 @@ data {
   
   int n_lbins; // number of length bins (here just the range of cm values)
   
-  int n_p_l_y[np, n_lbins, ny_train]; // SUM number of individuals in each length bin, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
-  
   matrix[n_ages, n_lbins] l_at_a_key;
   
   real abund_p_y[np, ny_train]; // MEAN density of individuals of any age in each haul; used for rescaling the abundance to fit to our data
@@ -90,6 +88,10 @@ data {
   int<lower = 0, upper = 1> T_dep_recruitment;
   
   int<lower = 0, upper = 1> T_dep_mortality;
+  
+  int<lower = 0, upper = 1> eval_l_comps;
+  
+  int n_p_l_y[np, n_lbins, ny_train]; // SUM number of individuals in each length bin, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
   
   
 }
@@ -230,195 +232,195 @@ transformed parameters{
       T_adjust[p,y] = T_dep(sbt[p,y], Topt, width);  
     } // close years
   } // close patches
-    
-    
+  
+  
   // calculate total annual mortality from instantaneous natural + fishing mortality data 
   // note that z is the proportion that survive, 1-z is the proportion that die 
-
-    for(p in 1:np){
-      for(a in 1:n_ages){
-        for(y in 1:ny_train){
-          
-          if(T_dep_mortality==1){
-            z[p,a,y] = exp(-(f[a,y] + m)) * T_adjust[p,y];
-          }
-          
-          if(T_dep_mortality==0){
-            z[p,a,y] = exp(-(f[a,y] + m)) ;
-          }
-          
-        }
-      }
-    }
-    
-    
-    // fill in year 1 of n_p_a_y_hat, initialized with mean_recruits 
-    for(p in 1:np){
-      for(a in 1:n_ages){
-        if(a==1){
-          // n_p_a_y_hat[p,a,1] = mean_recruits[p] * T_adjust[p,1] * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
-          
-          if(T_dep_recruitment==1){
-            n_p_a_y_hat[p,a,1] = mean_recruits * T_adjust[p,1] * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
-          }
-          if(T_dep_recruitment==0){
-            n_p_a_y_hat[p,a,1] = mean_recruits * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
-          }
-        } // close age==1 case
-        else{
-          n_p_a_y_hat[p,a,1] = n_p_a_y_hat[p,a-1,1] * z[p,a-1,1]; // initialize population with mean recruitment propogated through age classes with mortality
-        }
-        
-      } // close ages
-    } // close patches
-    
-    
-    // calculate recruitment deviates every year (not patch-specific)
-    for (y in 2:ny_train){
-      if (y == 2){ 
-        rec_dev[y-1]  =  raw[y]; // initialize first year of rec_dev with raw (process error) -- now not patch-specific
-        // need to fix this awkward burn in
-      } // close y==2 case  
-      else {
-        
-        rec_dev[y-1] =  alpha * rec_dev[y-2] + raw[y]; // why does rec_dev[y-1] use raw[y]? 
-        
-      } // close ifelse
-      
-      // describe population dynamics
-      for(p in 1:np){
-        
-        // density-independent, temperature-dependent recruitment of age 1
-        //  n_p_a_y_hat[p,1,y] = mean_recruits[p] * exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1];
-        
-        if(T_dep_recruitment==1){
-        n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1];
-        }
-        if(T_dep_recruitment==0){
-                  n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev[y-1] - pow(sigma_r,2)/2) ;
-
-        }
-        
-        // why estimate raw and sigma_r? we want to estimate process error
-        // if we got rid of sigma_r, we would be saying that raw could be anything
-        // that means raw could pick any value, and it would pick deviates to perfectly match abundance index
-        // sigma_r scales the amount of process error that we say is possible
-        // letting it go to infinity means the model will always fit the data perfectly 
-        // raw is the realized process error 
-        // exp(rec_dev[y-1] - pow(sigma_r,2)/2) = random variable with mean 0 and SD sigma_r
-        // allows us to have a different recruitment deviation every year even though sigma_r is constant 
-        
-        // pop dy for non-reproductive ages 
-        if(age_at_maturity > 1){ // confirm that there are non-reproductive age classes above 1
-        for(a in 2:(age_at_maturity-1)){
-          
-          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[p,a-1,y-1]; // these just grow and die in the patch
-          
-        } // close ages for 2 to age at maturity
-        } // close if 
-        
-        // pop dy for reproductive adults
-        // mortality and dispersal are happening simultaneously here, between generations
-        // because neither is patch-specific I don't think the order matters
-        
-        for(a in age_at_maturity:n_ages){
-          
-          // edge cases -- edges are reflecting
-          if(p==1){
-            n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[p,a-1,y-1] * (1-d) + n_p_a_y_hat[p+1, a-1, y-1] * z[p+1,a-1,y-1] * d;
-          } // close patch 1 case 
-          
-          else if(p==np){
-            n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[p,a-1,y-1] * (1-d) + n_p_a_y_hat[p-1, a-1, y-1] * z[p-1,a-1,y-1] * d;
-          } // close highest patch
-          
-          else{
-            n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[p,a-1,y-1] * (1-2*d) + n_p_a_y_hat[p-1, a-1, y-1] * z[p-1,a-1,y-1] * d + n_p_a_y_hat[p+1, a-1, y-1] * z[p+1,a-1,y-1] * d;
-            
-          } // close if/else for all other patches
-          
-        }// close ages
-      } // close patches 
-      
-      
-    } // close year 2+ loop
-    
-    for(p in 1:np){
+  
+  for(p in 1:np){
+    for(a in 1:n_ages){
       for(y in 1:ny_train){
         
-        n_p_l_y_hat[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(n_p_a_y_hat[p,1:n_ages,y])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
-        // see https://mc-stan.org/docs/2_18/reference-manual/array-data-types-section.html
+        if(T_dep_mortality==1){
+          z[p,a,y] = exp(-(f[a,y] + m)) * T_adjust[p,y];
+        }
         
-        // n_p_l_y_hat[y,p,1:n_lbins]  =  (to_vector(n_p_l_y_hat[y,p,1:n_lbins])  .* selectivity_at_bin)';
-        
-        dens_p_y_hat[p,y] = sum((to_vector(n_p_l_y_hat[y,p,1:n_lbins])));
-        
-        theta[p,y] = ((1/(1+exp(-beta_obs*dens_p_y_hat[p,y]))) - 0.5)*2;
-        // subtracting 0.5 and multiplying by 2 is a hacky way to get theta[0,1]
+        if(T_dep_mortality==0){
+          z[p,a,y] = exp(-(f[a,y] + m)) ;
+        }
         
       }
     }
-    
-    
-  } // close transformed parameters block
+  }
   
-  model {
-    
-    real n;
-    
-    vector[n_lbins] prob_hat;
-    
-    vector[n_lbins] prob;
-    
-    real dml_tmp;
-    
-    real test;
-    
-    beta_obs ~ normal(0.05,0.1); 
-    
-    // theta ~ uniform(0, 1); // Bernoulli probability of encounter
-    
-    
-    // log_f ~ normal(log(m / 2),.5);
-    
-    log_mean_recruits ~ normal(7,5);
-    
-    Topt ~ normal(18, 4);
-    
-    width ~ normal(4, 4); 
-    
-    // log_sigma_r ~ normal(log(.5),.1); // process error prior
-    
-    // alpha ~ normal(0,.25); // autocorrelation prior
-    
-    d ~ normal(0.1, 0.1); // dispersal rate as a proportion of total population size within the patch
-    
-    // sigma ~ normal(1,.1);  // total error prior
-    // 
-    // proc_ratio ~ beta(2,2);
-    // 
-    sigma_r ~ normal(.7,.2);
-    
-    sigma_obs ~ normal(0.1,.2);
-    
-    // sigma_obs ~ normal(.1, .1); // think more about whether these numbers are reasonable
-    
-    p_length_50_sel ~ normal(length_50_sel_guess/loo, .2);
-    
-    // log_scalar ~ normal(log(2),1);
-    
-    raw ~ normal(0, sigma_r);
-    
-    theta_d ~ normal(0.5,.1);
-    
-    
-    for(y in 2:ny_train) {
-      
-      for(p in 1:np){
+  
+  // fill in year 1 of n_p_a_y_hat, initialized with mean_recruits 
+  for(p in 1:np){
+    for(a in 1:n_ages){
+      if(a==1){
+        // n_p_a_y_hat[p,a,1] = mean_recruits[p] * T_adjust[p,1] * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
         
-        if((abund_p_y[p,y]) > 0) {
+        if(T_dep_recruitment==1){
+          n_p_a_y_hat[p,a,1] = mean_recruits * T_adjust[p,1] * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
+        }
+        if(T_dep_recruitment==0){
+          n_p_a_y_hat[p,a,1] = mean_recruits * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
+        }
+      } // close age==1 case
+      else{
+        n_p_a_y_hat[p,a,1] = n_p_a_y_hat[p,a-1,1] * z[p,a-1,1]; // initialize population with mean recruitment propogated through age classes with mortality
+      }
+      
+    } // close ages
+  } // close patches
+  
+  
+  // calculate recruitment deviates every year (not patch-specific)
+  for (y in 2:ny_train){
+    if (y == 2){ 
+      rec_dev[y-1]  =  raw[y]; // initialize first year of rec_dev with raw (process error) -- now not patch-specific
+      // need to fix this awkward burn in
+    } // close y==2 case  
+    else {
+      
+      rec_dev[y-1] =  alpha * rec_dev[y-2] + raw[y]; // why does rec_dev[y-1] use raw[y]? 
+      
+    } // close ifelse
+    
+    // describe population dynamics
+    for(p in 1:np){
+      
+      // density-independent, temperature-dependent recruitment of age 1
+      //  n_p_a_y_hat[p,1,y] = mean_recruits[p] * exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1];
+      
+      if(T_dep_recruitment==1){
+        n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1];
+      }
+      if(T_dep_recruitment==0){
+        n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev[y-1] - pow(sigma_r,2)/2) ;
+        
+      }
+      
+      // why estimate raw and sigma_r? we want to estimate process error
+      // if we got rid of sigma_r, we would be saying that raw could be anything
+      // that means raw could pick any value, and it would pick deviates to perfectly match abundance index
+      // sigma_r scales the amount of process error that we say is possible
+      // letting it go to infinity means the model will always fit the data perfectly 
+      // raw is the realized process error 
+      // exp(rec_dev[y-1] - pow(sigma_r,2)/2) = random variable with mean 0 and SD sigma_r
+      // allows us to have a different recruitment deviation every year even though sigma_r is constant 
+      
+      // pop dy for non-reproductive ages 
+      if(age_at_maturity > 1){ // confirm that there are non-reproductive age classes above 1
+      for(a in 2:(age_at_maturity-1)){
+        
+        n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[p,a-1,y-1]; // these just grow and die in the patch
+        
+      } // close ages for 2 to age at maturity
+      } // close if 
+      
+      // pop dy for reproductive adults
+      // mortality and dispersal are happening simultaneously here, between generations
+      // because neither is patch-specific I don't think the order matters
+      
+      for(a in age_at_maturity:n_ages){
+        
+        // edge cases -- edges are reflecting
+        if(p==1){
+          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[p,a-1,y-1] * (1-d) + n_p_a_y_hat[p+1, a-1, y-1] * z[p+1,a-1,y-1] * d;
+        } // close patch 1 case 
+        
+        else if(p==np){
+          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[p,a-1,y-1] * (1-d) + n_p_a_y_hat[p-1, a-1, y-1] * z[p-1,a-1,y-1] * d;
+        } // close highest patch
+        
+        else{
+          n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * z[p,a-1,y-1] * (1-2*d) + n_p_a_y_hat[p-1, a-1, y-1] * z[p-1,a-1,y-1] * d + n_p_a_y_hat[p+1, a-1, y-1] * z[p+1,a-1,y-1] * d;
           
-          
+        } // close if/else for all other patches
+        
+      }// close ages
+    } // close patches 
+    
+    
+  } // close year 2+ loop
+  
+  for(p in 1:np){
+    for(y in 1:ny_train){
+      
+      n_p_l_y_hat[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(n_p_a_y_hat[p,1:n_ages,y])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
+      // see https://mc-stan.org/docs/2_18/reference-manual/array-data-types-section.html
+      
+      // n_p_l_y_hat[y,p,1:n_lbins]  =  (to_vector(n_p_l_y_hat[y,p,1:n_lbins])  .* selectivity_at_bin)';
+      
+      dens_p_y_hat[p,y] = sum((to_vector(n_p_l_y_hat[y,p,1:n_lbins])));
+      
+      theta[p,y] = ((1/(1+exp(-beta_obs*dens_p_y_hat[p,y]))) - 0.5)*2;
+      // subtracting 0.5 and multiplying by 2 is a hacky way to get theta[0,1]
+      
+    }
+  }
+  
+  
+} // close transformed parameters block
+
+model {
+  
+  real n;
+  
+  vector[n_lbins] prob_hat;
+  
+  vector[n_lbins] prob;
+  
+  real dml_tmp;
+  
+  real test;
+  
+  beta_obs ~ normal(0.05,0.1); 
+  
+  // theta ~ uniform(0, 1); // Bernoulli probability of encounter
+  
+  
+  // log_f ~ normal(log(m / 2),.5);
+  
+  log_mean_recruits ~ normal(7,5);
+  
+  Topt ~ normal(18, 4);
+  
+  width ~ normal(4, 4); 
+  
+  // log_sigma_r ~ normal(log(.5),.1); // process error prior
+  
+  // alpha ~ normal(0,.25); // autocorrelation prior
+  
+  d ~ normal(0.1, 0.1); // dispersal rate as a proportion of total population size within the patch
+  
+  // sigma ~ normal(1,.1);  // total error prior
+  // 
+  // proc_ratio ~ beta(2,2);
+  // 
+  sigma_r ~ normal(.7,.2);
+  
+  sigma_obs ~ normal(0.1,.2);
+  
+  // sigma_obs ~ normal(.1, .1); // think more about whether these numbers are reasonable
+  
+  p_length_50_sel ~ normal(length_50_sel_guess/loo, .2);
+  
+  // log_scalar ~ normal(log(2),1);
+  
+  raw ~ normal(0, sigma_r);
+  
+  theta_d ~ normal(0.5,.1);
+  
+  
+  for(y in 2:ny_train) {
+    
+    for(p in 1:np){
+      
+      if((abund_p_y[p,y]) > 0) {
+        
+        if(eval_l_comps==1){
           if (sum(n_p_l_y[p,1:n_lbins,y]) > 0) {
             
             if (do_dirichlet == 1){
@@ -445,27 +447,29 @@ transformed parameters{
               
             } // close dirichlet statement
             
-          } // close if any length comps
+          } // close if any positive length comps
           
-          log(abund_p_y[p,y]) ~ normal(log( dens_p_y_hat[p,y] + 1e-6), sigma_obs); 
-          
-          1 ~ bernoulli(theta[p,y]);
-          
-          
-        } else { // only evaluate length comps if there are length comps to evaluate
+        } // close eval_length_comps
         
-        0 ~ bernoulli(theta[p,y]);
+        log(abund_p_y[p,y]) ~ normal(log( dens_p_y_hat[p,y] + 1e-6), sigma_obs); 
         
-        } // close else 
-      } // close patch loop
+        1 ~ bernoulli(theta[p,y]);
+        
+        
+      } else { // only evaluate length comps if there are length comps to evaluate
       
-    } // close year loop
+      0 ~ bernoulli(theta[p,y]);
+      
+      } // close else 
+    } // close patch loop
     
-    
-  }
+  } // close year loop
   
-  // 
-  // generated quantities {
+  
+}
+
+// 
+// generated quantities {
   //   real proj_n_p_a_y_hat[np, n_ages, ny_proj+1]; 
   //   real T_adjust_proj[np, ny_proj];
   //   vector[ny_proj] rec_dev_proj;
@@ -475,74 +479,74 @@ transformed parameters{
   //   real proj_dens_p_y_hat [np, ny_proj]; 
   //   
   //   for(a in 1:n_ages){
-  //     for(y in 1:(ny_proj+1)){
-  //       z_proj[a,y] = exp(-(f_proj[a,y] + m));
-  //     }
-  //   }
-  //   
-  //   for(p in 1:np){
-  //     for(y in 1:ny_proj){
-  //       T_adjust_proj[p,y] = T_dep(sbt_proj[p,y], Topt, width);  
-  //     } // close years
-  //   } // close patches
-  //   
-  //   
-  //   // initialize with final year of our model 
-  //   proj_n_p_a_y_hat[,,1] = n_p_a_y_hat[,,ny_train]; 
-  //   rec_dev_proj[1] = rec_dev[ny_train-1];
-  //   raw_proj[1] = raw[ny_train];
-  //   
-  //   // project pop dy 
-  //   for(y in 2:ny_proj){
-  //     raw_proj[y] = normal_rng(0, sigma_r);
-  //     //  print("raw_proj in year ",y," is ",raw_proj[y]);
-  //     rec_dev_proj[y] = alpha * rec_dev_proj[y-1] + raw_proj[y];
-  //     //  print("rec_dev_proj in year ",y," is ",rec_dev_proj[y]);
-  //     
-  //   }
-  //   
-  //   for(y in 2:(ny_proj+1)){
-  //     for(p in 1:np){
-  //       proj_n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2) * T_adjust_proj[p,y-1];
-  //       // print("recruits in year ",y," and patch ",p," are ",proj_n_p_a_y_hat[p,1,y]);
-  //       if(age_at_maturity > 1){ 
-  //         for(a in 2:(age_at_maturity-1)){
-  //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * z_proj[a-1,y-1]; 
-  //         } // close ages for 2 to age at maturity
-  //       } // close if 
-  //       
-  //       for(a in age_at_maturity:n_ages){
-  //         if(p==1){
-  //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * z_proj[a-1,y-1] * (1-d) + proj_n_p_a_y_hat[p+1, a-1, y-1] * z_proj[a-1,y-1] * d;
-  //         } // close patch 1 case 
-  //         
-  //         else if(p==np){
-  //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * z_proj[a-1,y-1] * (1-d) + proj_n_p_a_y_hat[p-1, a-1, y-1] * z_proj[a-1,y-1] * d;
-  //         } // close highest patch
-  //         
-  //         else{
-  //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * z_proj[a-1,y-1] * (1-2*d) + proj_n_p_a_y_hat[p-1, a-1, y-1] * z_proj[a-1,y-1] * d + proj_n_p_a_y_hat[p+1, a-1, y-1] * z_proj[a-1,y-1] * d;
-  //           
-  //         } // close if/else for all other patches
-  //         
-  //       }// close ages
-  //     } // close patches 
-  //     
-  //     
-  //   } // close year 2+ loop
-  //   
-  //   for(p in 1:np){
-  //     for(y in 1:(ny_proj)){
-  //       
-  //       proj_n_p_l_y_hat[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(proj_n_p_a_y_hat[p,1:n_ages,y])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
-  //       proj_dens_p_y_hat[p,y] = sum((to_vector(proj_n_p_l_y_hat[y,p,1:n_lbins])));
-  //       
-  //     }
-  //   }
-  //   
-  //   
-  // }
-  // 
-  // 
-  // 
-  
+    //     for(y in 1:(ny_proj+1)){
+      //       z_proj[a,y] = exp(-(f_proj[a,y] + m));
+      //     }
+      //   }
+      //   
+      //   for(p in 1:np){
+        //     for(y in 1:ny_proj){
+          //       T_adjust_proj[p,y] = T_dep(sbt_proj[p,y], Topt, width);  
+          //     } // close years
+          //   } // close patches
+          //   
+          //   
+          //   // initialize with final year of our model 
+          //   proj_n_p_a_y_hat[,,1] = n_p_a_y_hat[,,ny_train]; 
+          //   rec_dev_proj[1] = rec_dev[ny_train-1];
+          //   raw_proj[1] = raw[ny_train];
+          //   
+          //   // project pop dy 
+          //   for(y in 2:ny_proj){
+            //     raw_proj[y] = normal_rng(0, sigma_r);
+            //     //  print("raw_proj in year ",y," is ",raw_proj[y]);
+            //     rec_dev_proj[y] = alpha * rec_dev_proj[y-1] + raw_proj[y];
+            //     //  print("rec_dev_proj in year ",y," is ",rec_dev_proj[y]);
+            //     
+            //   }
+            //   
+            //   for(y in 2:(ny_proj+1)){
+              //     for(p in 1:np){
+                //       proj_n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2) * T_adjust_proj[p,y-1];
+                //       // print("recruits in year ",y," and patch ",p," are ",proj_n_p_a_y_hat[p,1,y]);
+                //       if(age_at_maturity > 1){ 
+                  //         for(a in 2:(age_at_maturity-1)){
+                    //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * z_proj[a-1,y-1]; 
+                    //         } // close ages for 2 to age at maturity
+                    //       } // close if 
+                    //       
+                    //       for(a in age_at_maturity:n_ages){
+                      //         if(p==1){
+                        //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * z_proj[a-1,y-1] * (1-d) + proj_n_p_a_y_hat[p+1, a-1, y-1] * z_proj[a-1,y-1] * d;
+                        //         } // close patch 1 case 
+                        //         
+                        //         else if(p==np){
+                          //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * z_proj[a-1,y-1] * (1-d) + proj_n_p_a_y_hat[p-1, a-1, y-1] * z_proj[a-1,y-1] * d;
+                          //         } // close highest patch
+                          //         
+                          //         else{
+                            //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * z_proj[a-1,y-1] * (1-2*d) + proj_n_p_a_y_hat[p-1, a-1, y-1] * z_proj[a-1,y-1] * d + proj_n_p_a_y_hat[p+1, a-1, y-1] * z_proj[a-1,y-1] * d;
+                            //           
+                            //         } // close if/else for all other patches
+                            //         
+                            //       }// close ages
+                            //     } // close patches 
+                            //     
+                            //     
+                            //   } // close year 2+ loop
+                            //   
+                            //   for(p in 1:np){
+                              //     for(y in 1:(ny_proj)){
+                                //       
+                                //       proj_n_p_l_y_hat[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(proj_n_p_a_y_hat[p,1:n_ages,y])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
+                                //       proj_dens_p_y_hat[p,y] = sum((to_vector(proj_n_p_l_y_hat[y,p,1:n_lbins])));
+                                //       
+                                //     }
+                                //   }
+                                //   
+                                //   
+                                // }
+                                // 
+                                // 
+                                // 
+                                

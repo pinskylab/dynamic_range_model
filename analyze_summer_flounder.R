@@ -18,6 +18,7 @@ sapply(funs, function(x) source(file.path("functions",x)))
 rstan_options(javascript=FALSE, auto_write =TRUE)
 
 dat <- read_csv(here("processed-data","flounder_catch_at_length_fall_training.csv"))
+# dat %<>% filter(length >17)
 dat_test <- read_csv(here("processed-data","flounder_catch_at_length_fall_testing.csv"))
 
 # the f-at-age data starts in 1982; fill in the previous years with the earliest year of data
@@ -331,8 +332,9 @@ stan_data <- list(
   patcharea = patcharea,
   l_at_a_key = l_at_a_mat,
   do_dirichlet = 1,
-  T_dep_mortality = 1,
-  T_dep_recruitment = 0 # think carefully before making more than one of these true
+  eval_l_comps = 0, # evaluate length composition data? 0=no, 1=yes
+  T_dep_mortality = 0, # 0=off, 1=on
+  T_dep_recruitment = 1 # think carefully before making more than one of the temperature dependencies true
   
 )
 
@@ -385,7 +387,7 @@ abundance_v_time <- abund_p_y_hat %>%
   facet_wrap(~patch, scales = "free_y") +
   labs(x="Year",y="Abundance") + 
   scale_fill_brewer()
-ggsave(abundance_v_time, filename=here("results","density_v_time.png"), width=7, height=4)
+ggsave(abundance_v_time, filename=here("results","density_v_time_no_length_comps.png"), width=7, height=4)
 
 # assess length comp fits
 
@@ -532,7 +534,7 @@ gg_centroid <- est_centroid %>%
   scale_fill_brewer() +
   geom_point(data = dat_centroid, aes(year, centroid_lat), color = "red") +
   theme(legend.position = "none")
-ggsave(gg_centroid, filename=here("results","centroid_v_time.png"))
+ggsave(gg_centroid, filename=here("results","centroid_v_time_no_length_comps.png"))
 
 # centroid didn't shift at all!
 
@@ -558,8 +560,8 @@ estimated_abundance_tile <- est_patch_abund %>%
   scale_y_continuous(breaks=seq(1, 7, 1)) +
   labs(title="Estimated")
 
-ggsave(observed_abundance_tile, filename=here("results","observed_abundance_v_time_tileplot.png"))
-ggsave(estimated_abundance_tile, filename=here("results","estimated_abundance_v_time_tileplot.png"))
+ggsave(observed_abundance_tile, filename=here("results","observed_abundance_v_time_tileplot_no_length_comps.png"))
+ggsave(estimated_abundance_tile, filename=here("results","estimated_abundance_v_time_tileplot_no_length_comps.png"))
 
 # who's doing the colonizing?
 dat_train_lengths %>% 
