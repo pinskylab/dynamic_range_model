@@ -230,6 +230,22 @@ n_lbins <- length(lbins)
 
 n_ages <- nrow(l_at_a_mat)
 
+# now that we have n_ages, calculate weight at age
+# THIS IS VERY HARD CODED, AND ALSO NOT PROBABILISTIC
+# NEED TO FIX
+wt_at_age_prep <- read_csv(here("processed-data","summer_flounder_wt_at_age.csv")) %>% 
+  filter(!Age %in% seq(7, 10, 1)) %>% 
+  mutate(Age = gsub("over7",7,Age),
+         Age = as.numeric(Age),
+         Age = Age + 1) %>% # start at 1 not 0
+  group_by(Age) %>% 
+  summarise(wt = mean(Wt)) %>% # average over all years 
+  ungroup() %>% 
+  arrange(Age)
+# fill in plus ages
+wt_at_age_add <- data.frame(Age = seq(max(wt_at_age_prep+1),n_ages,1), wt = slice_tail(wt_at_age_prep)$wt)
+wt_at_age <- rbind(wt_at_age_prep, wt_at_age_add)$wt
+
 # now that years are defined above, convert them into indices in the datasets
 # be sure all these dataframes have exactly the same year range! 
 
@@ -331,11 +347,12 @@ stan_data <- list(
   age_at_maturity = age_at_maturity,
   patcharea = patcharea,
   l_at_a_key = l_at_a_mat,
+  wt_at_age = wt_at_age,
   do_dirichlet = 1,
   eval_l_comps = 0, # evaluate length composition data? 0=no, 1=yes
-  T_dep_mortality = 0, # 0=off, 1=on
-  T_dep_recruitment = 1 # think carefully before making more than one of the temperature dependencies true
-  
+  T_dep_mortality = 0, # CURRENTLY NOT REALLY WORKING
+  T_dep_recruitment = 1, # think carefully before making more than one of the temperature dependencies true
+  spawner_recruit_relationship = 0
 )
 
 warmups <- 1000
@@ -343,12 +360,14 @@ total_iterations <- 2000
 max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
-stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!
+
+stan_model_fit <- stan(file = here::here("src","process_sdm_stock_recruit.stan"), # check that it's the right model!
                        data = stan_data,
                        chains = n_chains,
                        warmup = warmups,
                        init = list(list(log_mean_recruits = log(1000),
-                                        theta_d = 1)),
+                                        theta_d = 1,
+                                        ssb0=1000000)),
                        iter = total_iterations,
                        cores = n_cores,
                        refresh = 250,
@@ -533,7 +552,8 @@ gg_centroid <- est_centroid %>%
   stat_lineribbon() + 
   scale_fill_brewer() +
   geom_point(data = dat_centroid, aes(year, centroid_lat), color = "red") +
-  theme(legend.position = "none")
+  theme(legend.position = "none") +
+  labs(x="Year", y="Patch", title="Centroid Position", fill="Credible Interval")
 ggsave(gg_centroid, filename=here("results","centroid_v_time_no_length_comps.png"))
 
 # centroid didn't shift at all!
@@ -549,7 +569,7 @@ observed_abundance_tile <- abund_p_y %>%
   theme_bw() +
   scale_x_continuous(breaks=seq(0, 36, 4)) +
   scale_y_continuous(breaks=seq(1, 7, 1)) +
-  labs(title="Observed")
+  labs(title="Observed", x="Year", y="Patch", fill="Abundance")
 
 
 estimated_abundance_tile <- est_patch_abund %>% 
@@ -603,7 +623,7 @@ dat_train_sbt %>%
 ########
 # evaluate forecast
 ########
-proj_dens_p_y_hat <- spread_draws(stan_model_fit, proj_dens_p_y_hat[np, ny_proj])
+proj_dens_p_y_hat <- gather_draws(stan_model_fit, proj_dens_p_y_hat[np, ny_proj])
 
 proj_abund_p_y <- dat_test_dens %>%
   left_join(patchdat, by = c("lat_floor", "patch")) %>% 
@@ -635,6 +655,7 @@ ggsave(proj_estimated_abundance_tile, filename=here("results","proj_estimated_ab
 ggsave(proj_observed_abundance_tile, filename=here("results","proj_observed_abundance_v_time_tileplot.png"))
 
 proj_abundance_v_time <- proj_dens_p_y_hat %>% 
+  rename(patch=np) %>% 
   ggplot(aes(ny_proj, proj_dens_p_y_hat)) + 
   stat_lineribbon() + 
   geom_point(data = proj_abund_p_y, aes(year, abundance), color = "red") +
@@ -644,3 +665,21 @@ proj_abundance_v_time <- proj_dens_p_y_hat %>%
   theme(legend.position="none") +
   scale_fill_brewer()
 ggsave(proj_abundance_v_time, filename=here("results","proj_density_v_time.png"), width=7, height=4)
+
+# centroid position by year 
+dat_centroid_proj <- proj_abund_p_y %>% 
+  group_by(year) %>% 
+  summarise(centroid_lat = weighted.mean(x=patch, w=abundance))
+
+# model fit centroid -- should eventually estimate in model for proper SE -- just exploring here
+est_centroid_proj <- proj_dens_p_y_hat %>% 
+  group_by(ny_proj, .iteration) %>%  # IS THIS SUPPOSED TO BE .ITERATION? CHECK WHEN MODEL IS RUN FOR LONGER 
+  summarise(centroid_lat = weighted.mean(x=np, w=.value)) %>% 
+  ungroup()
+
+gg_centroid_proj <- est_centroid_proj %>% 
+  ggplot(aes(ny_proj, centroid_lat)) + 
+  stat_lineribbon() + 
+  scale_fill_brewer() +
+  geom_point(data = dat_centroid_proj, aes(year, centroid_lat), color = "red") +
+  theme(legend.position = "none")

@@ -18,5 +18,16 @@ F_df <- F_out[[1]] %>% # make into data frame
   slice(2:37) %>%  # get rid of the first row which was null 
   select(Year, `F`) # also has SSB and R columns that we don't need at present
 
+# from SAW66 p173-174 Table A33. Mean weight (kg) at age of summer flounder catch, Maine­North Carolina. Includes ‘New’ MRFSS/MRIP.
+wt_path <- here("summer_flounder_weight_at_age_tables.pdf")
+wt_out <- extract_tables(wt_path, output="data.frame")
+wt_df1 <- wt_out[[1]]
+wt_df2 <- wt_out[[2]]
+wt_df <- rbind(wt_df1, wt_df2) %>% 
+  select(1:12, 14) %>% # drop total column
+  set_names(c('Year',seq(0, 10, 1), "over7")) %>% # add column names back in -- get from the pdf
+  pivot_longer(cols=2:13, names_to="Age", values_to="Wt") # tidy df 
+
 write_csv(F_age_df, here("processed-data","summer_flounder_F_by_age.csv"))
 write_csv(F_df, here("processed-data","summer_flounder_F.csv"))
+write_csv(wt_df, here("processed-data","summer_flounder_wt_at_age.csv"))
