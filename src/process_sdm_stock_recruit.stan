@@ -154,29 +154,17 @@ parameters{
   
   real Topt; //  temp at which recruitment is maximized
   
-  // real<lower = 1e-3,upper = 10> sigma;
-  
-  // real<lower = 0, upper = 1>  proc_ratio; // sigma recruits
-  
-   real<lower = -1, upper = 1> alpha; // autocorrelation term
+  real<lower = -1, upper = 1> alpha; // autocorrelation term
   
   real  log_mean_recruits; // log mean recruits per patch, changed to one value for all space/time
-  
-  //  vector[np] log_mean_recruits;
   
   vector[ny_train] raw; // array of raw recruitment deviates, changed to one value per year
   
   real<upper = 0.8> p_length_50_sel; // length at 50% selectivity
   
-  //  real<lower=0, upper=1> theta; // Bernoulli parameter for encounter probability
-  
-  
   real<lower=0, upper=1> beta_obs; // controls how fast detection goes up with abundance
   
   real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
-  
-  // real<upper = log(0.6)> log_f;
-  // real log_scalar;
   
   real <lower = 0> theta_d;
   
@@ -190,15 +178,10 @@ transformed parameters{
   
   real T_adjust[np, ny_train]; // tuning parameter for sbt suitability in each patch*year
   
-  // real sigma_r;
-  
-  // real sigma_obs;
-  
   real length_50_sel;
   
   real sel_delta;
   
-  // vector[np] mean_recruits;
   real mean_recruits;
   
   matrix<lower=0, upper=1> [np, ny_train] theta; // Bernoulli probability of encounter  
@@ -211,19 +194,11 @@ transformed parameters{
   
   vector[ny_train-1] rec_dev; // array of realized recruitment deviates, also now only 1/yr (it's a good or bad year everywhere)
   
-  // vector[n_ages] sel_at_age; // vector of selectivity at stage
-  
-  // vector[n_ages] mean_selectivity_at_age; // mean selectivity at age
-  
   vector[n_lbins] selectivity_at_bin; // mean selectivity at length bin midpoint
   
   real surv[np, n_ages, ny_train];
   
-  // real scalar = exp(log_scalar);
-  
-  //  real f = exp(log_f);
-  
-  real<lower=0> ssb0;
+  real ssb0;
   
   vector[n_ages] unfished;
   
@@ -231,13 +206,7 @@ transformed parameters{
   
   vector[n_ages] stupid_vector;
   
-//  real alpha = 0;
-  
-  // real d = 0;
-  // sigma_r = sigma * proc_ratio;
-  
-  // sigma_obs = sigma * (1 - proc_ratio);
-
+  ssb0 = -999;
 
   if(spawner_recruit_relationship==1){
     for(a in 1:n_ages){
