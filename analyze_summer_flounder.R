@@ -130,6 +130,7 @@ patchdat <- dat %>%
   filter(lat_floor %in% top_patches$lat_floor) %>% 
   ungroup() %>% 
   mutate(patch = as.integer(as.factor(lat_floor)))
+meanpatcharea <- mean(patchdat$patch_area_km2)
 
 dat_train_sbt <- dat %>%   
   mutate(lat_floor = floor(lat)) %>% 
@@ -221,7 +222,7 @@ dat_f_age_proj <- dat_f_age_prep %>%
 
 #get other dimensions
 patches <- sort(unique(dat_train_lengths$lat_floor))
-patcharea <- patchdat %>% arrange(patch) %>% pull(patch_area_km2)
+#patcharea <- patchdat %>% arrange(patch) %>% pull(patch_area_km2)
 np = length(patches) 
 
 lbins <- unique(length_at_age_key$length_bin)
@@ -276,10 +277,11 @@ plot(len[4,,20])
 dens <- array(NA, dim=c(np, ny))
 for(p in 1:np){
   for(y in 1:ny){
-    tmp2 <- dat_train_dens %>% filter(patch==p, year==y) %>% 
-      left_join(patchdat, by = c("lat_floor","patch"))%>% 
-      mutate(mean_dens = mean_dens * patch_area_km2)
-    dens[p,y] <- tmp2$mean_dens
+    tmp2 <- dat_train_dens %>% filter(patch==p, year==y) 
+   #   left_join(patchdat, by = c("lat_floor","patch"))%>% 
+   #   mutate(mean_dens = mean_dens * patch_area_km2)
+   # dens[p,y] <- tmp2$mean_dens
+    dens[p,y] <- tmp2$mean_dens *meanpatcharea
   }
 }
 
@@ -345,7 +347,6 @@ stan_data <- list(
   bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
   sel_100 = 3, # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
   age_at_maturity = age_at_maturity,
-  patcharea = patcharea,
   l_at_a_key = l_at_a_mat,
   wt_at_age = wt_at_age,
   do_dirichlet = 1,
@@ -391,10 +392,11 @@ plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','alpha','beta_obs','theta_
 hist(extract(stan_model_fit, "mean_recruits")$mean_recruits)
 
 abund_p_y <- dat_train_dens %>%
-  left_join(patchdat, by = c("lat_floor", "patch")) %>% 
-  group_by(patch, year) %>% 
-  summarise(abundance = sum(mean_dens *patch_area_km2)) %>% 
-  ungroup()
+  mutate(abundance = mean_dens * meanpatcharea) 
+ # left_join(patchdat, by = c("lat_floor", "patch")) %>% 
+ # group_by(patch, year) %>% 
+ # summarise(abundance = sum(mean_dens *meanpatcharea)) %>% 
+ # ungroup()
 
 
 abund_p_y_hat <- tidybayes::spread_draws(stan_model_fit, dens_p_y_hat[patch,year])
@@ -626,10 +628,11 @@ dat_train_sbt %>%
 proj_dens_p_y_hat <- gather_draws(stan_model_fit, proj_dens_p_y_hat[np, ny_proj])
 
 proj_abund_p_y <- dat_test_dens %>%
-  left_join(patchdat, by = c("lat_floor", "patch")) %>% 
-  group_by(patch, year) %>% 
-  summarise(abundance = sum(mean_dens *patch_area_km2)) %>% 
-  ungroup()
+  mutate(abundance = mean_dens * meanpatcharea)
+ # left_join(patchdat, by = c("lat_floor", "patch")) %>% 
+ # group_by(patch, year) %>% 
+ # summarise(abundance = sum(mean_dens *patch_area_km2)) %>% 
+#  ungroup()
 
 proj_observed_abundance_tile <- proj_abund_p_y %>% 
   ggplot(aes(x=year, y=patch, fill=abundance)) +
@@ -642,7 +645,7 @@ proj_observed_abundance_tile <- proj_abund_p_y %>%
 
 proj_est_patch_abund <- proj_dens_p_y_hat %>% 
   group_by(ny_proj, np) %>% 
-  summarise(abundance = mean(proj_dens_p_y_hat))
+  summarise(abundance = mean(.value))
 
 proj_estimated_abundance_tile <- proj_est_patch_abund %>% 
   ggplot(aes(x=ny_proj, y=np, fill=abundance)) +
@@ -656,7 +659,7 @@ ggsave(proj_observed_abundance_tile, filename=here("results","proj_observed_abun
 
 proj_abundance_v_time <- proj_dens_p_y_hat %>% 
   rename(patch=np) %>% 
-  ggplot(aes(ny_proj, proj_dens_p_y_hat)) + 
+  ggplot(aes(ny_proj, .value)) + 
   stat_lineribbon() + 
   geom_point(data = proj_abund_p_y, aes(year, abundance), color = "red") +
   facet_wrap(~patch, scales = "free_y") +
@@ -683,3 +686,4 @@ gg_centroid_proj <- est_centroid_proj %>%
   scale_fill_brewer() +
   geom_point(data = dat_centroid_proj, aes(year, centroid_lat), color = "red") +
   theme(legend.position = "none")
+ggsave(gg_centroid_proj, filename=here("results","proj_centroid_v_time.png"))

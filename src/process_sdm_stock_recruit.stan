@@ -83,8 +83,6 @@ data {
   
   int age_at_maturity;
   
-  vector[np] patcharea;
-  
   int<lower = 0, upper = 1> do_dirichlet;
   
   int<lower = 0, upper = 1> T_dep_recruitment;
@@ -207,7 +205,17 @@ transformed parameters{
   vector[n_ages] stupid_vector;
   
   ssb0 = -999;
-
+  
+  for(a in 1:n_ages){
+    unfished[a] = 999;
+    stupid_vector[a] = 999;
+  }
+  for(p in 1:np){
+    for(y in 1:ny_train){
+      ssb[p,y] = 999;
+    }
+  }
+  
   if(spawner_recruit_relationship==1){
     for(a in 1:n_ages){
       if(a==1){
@@ -216,12 +224,12 @@ transformed parameters{
       else{
         unfished[a] = unfished[a-1] * m;
       }
-          print("unfished at age ",a," is ",unfished[a]);
-
+      print("unfished at age ",a," is ",unfished[a]);
+      
     }
     ssb0 = sum(unfished .* maturity_at_age .* wt_at_age);
   }
-
+  
   
   sel_delta = 2;
   
@@ -435,7 +443,7 @@ model {
   
   // log_sigma_r ~ normal(log(.5),.1); // process error prior
   
-   alpha ~ normal(0,.25); // autocorrelation prior
+  alpha ~ normal(0,.25); // autocorrelation prior
   
   d ~ normal(0.1, 0.1); // dispersal rate as a proportion of total population size within the patch
   
