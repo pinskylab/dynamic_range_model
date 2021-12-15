@@ -334,7 +334,7 @@ stan_data <- list(
   abund_p_y = dens,
   sbt = sbt,
   sbt_proj=sbt_proj,
-  m=m,
+  m=0.01, # TEST
   f=f,
   f_proj=f_proj,
   k=k,
@@ -352,8 +352,8 @@ stan_data <- list(
   do_dirichlet = 1,
   eval_l_comps = 0, # evaluate length composition data? 0=no, 1=yes
   T_dep_mortality = 0, # CURRENTLY NOT REALLY WORKING
-  T_dep_recruitment = 1, # think carefully before making more than one of the temperature dependencies true
-  spawner_recruit_relationship = 0
+  T_dep_recruitment = 0, # think carefully before making more than one of the temperature dependencies true
+  spawner_recruit_relationship = 1
 )
 
 warmups <- 1000
@@ -366,9 +366,9 @@ stan_model_fit <- stan(file = here::here("src","process_sdm_stock_recruit.stan")
                        data = stan_data,
                        chains = n_chains,
                        warmup = warmups,
-                       init = list(list(log_mean_recruits = log(1000),
-                                        theta_d = 1,
-                                        ssb0=1000000)),
+                  #     init = list(list(log_mean_recruits = log(1000),
+                  #                      theta_d = 1,
+                   #                     ssb0=1000000)),
                        iter = total_iterations,
                        cores = n_cores,
                        refresh = 250,

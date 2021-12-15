@@ -236,7 +236,7 @@ ages <- array(0, dim = c(np, n_ages, ny))
 for(p in 1:np){
   for(l in unique(sim$age)){
     for(y in 1:ny){
-      tmp <- sim2 %>% filter(patch==p, age == l, year==y) 
+      tmp <- sim %>% filter(patch==p, age == l, year==y) 
       if (nrow(tmp) > 0){
         ages[p,l,y] <- round(tmp$numbers)
       }
@@ -521,3 +521,13 @@ p_length_50_sel$p_length_50_sel
 hist(p_length_50_sel$p_length_50_sel)
 
 
+
+abund_p_y_hat_fixed <- tidybayes::spread_draws(fixed_param_stan_model_fit, dens_p_y_hat[patch,year])
+
+abund_p_y_hat_fixed %>% 
+  filter(patch==1) %>% 
+  ggplot(aes(year, (dens_p_y_hat ))) + 
+  stat_lineribbon() + 
+  geom_point(data = new_abund_p_y %>% as.data.frame() %>% pivot_longer(cols=everything()) %>% mutate(year = as.numeric(gsub("V","",name))), aes(x=year, y=value), color="red") +
+  scale_x_continuous(name = "Year") + 
+  scale_y_continuous(name = "Abundance")
