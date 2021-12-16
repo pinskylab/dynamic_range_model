@@ -352,7 +352,7 @@ stan_data <- list(
   do_dirichlet = 1,
   eval_l_comps = 0, # evaluate length composition data? 0=no, 1=yes
   T_dep_mortality = 0, # CURRENTLY NOT REALLY WORKING
-  T_dep_recruitment = 0, # think carefully before making more than one of the temperature dependencies true
+  T_dep_recruitment = 1, # think carefully before making more than one of the temperature dependencies true
   spawner_recruit_relationship = 1
 )
 

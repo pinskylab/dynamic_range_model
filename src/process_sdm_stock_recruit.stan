@@ -168,7 +168,7 @@ parameters{
   
   real<lower=0, upper=1> h;
   
-  real<lower=0> r0;
+  real log_r0;
   
 }
 
@@ -203,6 +203,10 @@ transformed parameters{
   matrix[np, ny_train] ssb;
   
   vector[n_ages] stupid_vector;
+  
+  real<lower=0> r0;
+  
+  r0 = exp(log_r0);
 
   ssb0 = -999;
   
@@ -286,10 +290,10 @@ transformed parameters{
           n_p_a_y_hat[p,a,1] = mean_recruits * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
         }
         if(T_dep_recruitment==0 && spawner_recruit_relationship==1){
-          n_p_a_y_hat[p,a,1] = r0;
+          n_p_a_y_hat[p,a,1] = r0 * 0.1; // scale it down a bit -- historical fishing was still occurring
         }
         if(T_dep_recruitment==1 && spawner_recruit_relationship==1){
-          n_p_a_y_hat[p,a,1] = r0* T_adjust[p,1];
+          n_p_a_y_hat[p,a,1] = r0 * 0.1 * T_adjust[p,1];
         }
       } // close age==1 case
       else{
@@ -434,7 +438,7 @@ model {
   
   if(spawner_recruit_relationship==1){
     h ~ normal(0.6, 0.25);
-    r0 ~ normal(1e14,1e1);
+    log_r0 ~ normal(15,5);
   }
   
   Topt ~ normal(18, 4);
