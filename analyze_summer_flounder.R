@@ -80,6 +80,7 @@ eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
 T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
 T_dep_recruitment = 1 # think carefully before making more than one of the temperature dependencies true
 spawner_recruit_relationship = 0
+run_forecast=1
 
 ##########
 # prep data for fitting
@@ -384,7 +385,8 @@ stan_data <- list(
   eval_l_comps = eval_l_comps, # evaluate length composition data? 0=no, 1=yes
   T_dep_mortality = T_dep_mortality, # CURRENTLY NOT REALLY WORKING
   T_dep_recruitment = T_dep_recruitment, # think carefully before making more than one of the temperature dependencies true
-  spawner_recruit_relationship = spawner_recruit_relationship
+  spawner_recruit_relationship = spawner_recruit_relationship, 
+  run_forecast=run_forecast
 )
 
 warmups <- 1000
