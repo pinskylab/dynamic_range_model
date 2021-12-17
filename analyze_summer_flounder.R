@@ -71,19 +71,36 @@ if(make_data_plots==TRUE){
 # prep data for fitting
 ##########
 
+trim_to_abundant_patches=FALSE
+if(trim_to_abundant_patches==TRUE){
 # reshape fish data 
-top_patches <- dat %>% 
+use_patches <- dat %>% 
   mutate(lat_floor = floor(lat)) %>% 
   group_by(lat_floor) %>% 
   summarise(total = sum(number_at_length)) %>% 
   arrange(-total) %>% 
   slice(1:7) # CHECK THIS MANUALLY TO BE SURE IT'S SANE, AND PATCHES ARE CONTIGUOUS
 
+patches <- sort(unique(use_patches$lat_floor))
+np = length(patches) 
+}
+
+if(trim_to_abundant_patches==FALSE){
+  # reshape fish data 
+  use_patches <- dat %>% 
+    mutate(lat_floor = floor(lat)) %>% 
+    group_by(lat_floor) %>% 
+    summarise(total = sum(number_at_length))
+  
+  patches <- sort(unique(use_patches$lat_floor))
+  np = length(patches) 
+}
+
 dat_train_lengths <- dat %>% 
   mutate(lat_floor = floor(lat)) %>% 
   group_by(length, year, lat_floor) %>% 
   summarise(sum_num_at_length = sum(number_at_length)) %>% 
-  filter(lat_floor %in% top_patches$lat_floor)%>% 
+  filter(lat_floor %in% patches)%>% 
   ungroup() %>% 
   mutate(patch = as.integer(as.factor(lat_floor)))
 
@@ -91,13 +108,13 @@ dat_test_lengths <- dat_test %>%
   mutate(lat_floor = floor(lat)) %>% 
   group_by(length, year, lat_floor) %>% 
   summarise(sum_num_at_length = sum(number_at_length)) %>% 
-  filter(lat_floor %in% top_patches$lat_floor)%>% 
+  filter(lat_floor %in% patches)%>% 
   ungroup() %>% 
   mutate(patch = as.integer(as.factor(lat_floor)))
 
 dat_train_dens <- dat %>% 
   mutate(lat_floor = floor(lat)) %>% 
-  filter(lat_floor %in% top_patches$lat_floor) %>% 
+  filter(lat_floor %in% patches) %>% 
   group_by(haulid) %>% 
   mutate(dens = sum(number_at_length)) %>% # get total no. fish in each haul, of any size
   group_by(year, lat_floor) %>% 
@@ -107,13 +124,19 @@ dat_train_dens <- dat %>%
 
 dat_test_dens <- dat_test %>% 
   mutate(lat_floor = floor(lat)) %>% 
-  filter(lat_floor %in% top_patches$lat_floor) %>% 
+  filter(lat_floor %in% patches) %>% 
   group_by(haulid) %>% 
   mutate(dens = sum(number_at_length)) %>% # get total no. fish in each haul, of any size
   group_by(year, lat_floor) %>% 
   summarise(mean_dens = mean(dens)) %>%  # get mean density (all sizes) / haul for the patch*year combo 
   ungroup() %>% 
   mutate(patch = as.integer(as.factor(lat_floor)))
+
+# get time dimension
+years <- sort(unique(dat_train_lengths$year)) 
+years_proj <- sort(unique(dat_test_lengths$year))
+ny <- length(years)
+ny_proj <- length(years_proj)
 
 # get patch area 
 patchdat <- dat %>% 
@@ -127,7 +150,7 @@ patchdat <- dat %>%
   mutate(lon_dist = distGeo(p1=c(max_lon, lat_floor+0.5), p2=c(min_lon, lat_floor+0.5))/1000, # get distance between the furthest longitudes in km, at the midpoint of the lat band 
          patch_area_km2 = lon_dist * 111) %>%  # 1 degree latitude = 111 km 
   select(lat_floor, patch_area_km2) %>% 
-  filter(lat_floor %in% top_patches$lat_floor) %>% 
+  filter(lat_floor %in% patches) %>% 
   ungroup() %>% 
   mutate(patch = as.integer(as.factor(lat_floor)))
 meanpatcharea <- mean(patchdat$patch_area_km2)
@@ -137,7 +160,7 @@ dat_train_sbt <- dat %>%
   group_by(lat_floor, year) %>% 
   summarise(sbt = mean(btemp, na.rm=TRUE)) %>% 
   ungroup() %>% 
-  filter(lat_floor %in% top_patches$lat_floor)%>% 
+  filter(lat_floor %in% patches)%>% 
   mutate(patch = as.integer(as.factor(lat_floor)))
 
 dat_test_sbt <- dat_test %>%   
@@ -145,9 +168,13 @@ dat_test_sbt <- dat_test %>%
   group_by(lat_floor, year) %>% 
   summarise(sbt = mean(btemp, na.rm=TRUE)) %>% 
   ungroup() %>% 
-  filter(lat_floor %in% top_patches$lat_floor)%>% 
+  filter(lat_floor %in% patches)%>% 
   mutate(patch = as.integer(as.factor(lat_floor))) %>% 
   filter(!is.na(sbt))
+
+# how many rows should each df have?
+nrow(dat_train_sbt)==(np*ny)
+nrow(dat_test_sbt) == (np*ny_proj) 
 
 # some SBT data are missing: lat 35, 36, and 37 in 2008
 # THIS IS VERY HARD CODED! DANGER
@@ -208,22 +235,13 @@ l_at_a_mat <- length_at_age_key %>%
   select(-age) %>% 
   as.matrix()
 
-# get time dimension
-years <- sort(unique(dat_train_lengths$year)) 
-years_proj <- sort(unique(dat_test_lengths$year))
-ny <- length(years)
-ny_proj <- length(years_proj)
+# prep f data
 dat_f_age <- dat_f_age_prep %>% 
   filter(year %in% years) 
 
 dat_f_age_proj <- dat_f_age_prep %>% 
   filter(year %in% years_proj) %>%
   bind_rows(dat_f_age %>% filter(year==max(year))) # need final year of training data to initialize projection
-
-#get other dimensions
-patches <- sort(unique(dat_train_lengths$lat_floor))
-#patcharea <- patchdat %>% arrange(patch) %>% pull(patch_area_km2)
-np = length(patches) 
 
 lbins <- unique(length_at_age_key$length_bin)
 # lbins <- sort(unique(dat_train_lengths$length))
@@ -334,7 +352,7 @@ stan_data <- list(
   abund_p_y = dens,
   sbt = sbt,
   sbt_proj=sbt_proj,
-  m=0.01, # TEST
+  m=m,
   f=f,
   f_proj=f_proj,
   k=k,
@@ -353,7 +371,7 @@ stan_data <- list(
   eval_l_comps = 0, # evaluate length composition data? 0=no, 1=yes
   T_dep_mortality = 0, # CURRENTLY NOT REALLY WORKING
   T_dep_recruitment = 1, # think carefully before making more than one of the temperature dependencies true
-  spawner_recruit_relationship = 1
+  spawner_recruit_relationship = 0
 )
 
 warmups <- 1000
@@ -408,6 +426,7 @@ abundance_v_time <- abund_p_y_hat %>%
   facet_wrap(~patch, scales = "free_y") +
   labs(x="Year",y="Abundance") + 
   scale_fill_brewer()
+abundance_v_time
 ggsave(abundance_v_time, filename=here("results","density_v_time_no_length_comps.png"), width=7, height=4)
 
 # assess length comp fits
@@ -556,6 +575,7 @@ gg_centroid <- est_centroid %>%
   geom_point(data = dat_centroid, aes(year, centroid_lat), color = "red") +
   theme(legend.position = "none") +
   labs(x="Year", y="Patch", title="Centroid Position", fill="Credible Interval")
+gg_centroid
 ggsave(gg_centroid, filename=here("results","centroid_v_time_no_length_comps.png"))
 
 # centroid didn't shift at all!
@@ -570,7 +590,7 @@ observed_abundance_tile <- abund_p_y %>%
   geom_tile() +
   theme_bw() +
   scale_x_continuous(breaks=seq(0, 36, 4)) +
-  scale_y_continuous(breaks=seq(1, 7, 1)) +
+  scale_y_continuous(breaks=seq(1, np, 1)) +
   labs(title="Observed", x="Year", y="Patch", fill="Abundance")
 
 
@@ -579,7 +599,7 @@ estimated_abundance_tile <- est_patch_abund %>%
   geom_tile() +
   theme_bw() +
   scale_x_continuous(breaks=seq(0, 36, 4)) +
-  scale_y_continuous(breaks=seq(1, 7, 1)) +
+  scale_y_continuous(breaks=seq(1, np, 1)) +
   labs(title="Estimated")
 
 ggsave(observed_abundance_tile, filename=here("results","observed_abundance_v_time_tileplot_no_length_comps.png"))
