@@ -16,7 +16,7 @@ load(paste0(OApath,"data_raw/neus_Survdat.RData")) # get length data
 load(paste0(OApath, "data_raw/neus_SVSPP.RData")) # get taxonomy
 
 spp_of_interest <- c("Squalus acanthias")
-reg_of_interest <- c("Northeast US Fall","Northeast US Spring")
+reg_of_interest <- c("Northeast US Fall")
 
 
 max_yr <- 2016 # 2017 is missing, for some reason 
@@ -131,7 +131,9 @@ len <- expand.grid(haulid=unique(dat_exploded_neus$haulid), length=seq(min(len_p
 
 explore_len <- TRUE
 if(explore_len <- TRUE){
-  
+  len %>% ggplot(aes(x=length, y=number_at_length)) +
+    geom_line() + 
+    facet_wrap(~year)
 }
 
 len_train <- len %>% 
@@ -142,5 +144,5 @@ len_test <- len %>%
   filter(year >= forecast_yr_1,
          year <= max_yr)
 
-write_csv(len_train, here("processed-data","dogfish_catch_at_length_fall_training.csv"))
-write_csv(len_test, here("processed-data","dogfish_catch_at_length_fall_testing.csv"))
+write_csv(len_train, here("processed-data","spiny_dogfish_catch_at_length_fall_training.csv"))
+write_csv(len_test, here("processed-data","spiny_dogfish_catch_at_length_fall_testing.csv"))

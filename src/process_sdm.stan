@@ -81,8 +81,6 @@ data {
   
   int age_at_maturity;
   
-  vector[np] patcharea;
-  
   int<lower = 0, upper = 1> do_dirichlet;
   
   int<lower = 0, upper = 1> T_dep_recruitment;

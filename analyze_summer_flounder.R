@@ -25,12 +25,27 @@ dat <- read_csv(here("processed-data","flounder_catch_at_length_fall_training.cs
 # dat %<>% filter(length >17)
 dat_test <- read_csv(here("processed-data","flounder_catch_at_length_fall_testing.csv"))
 
+
+#############
+# make model decisions
+#############
+trim_to_abundant_patches=FALSE
+do_dirichlet = 1
+eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
+T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
+T_dep_recruitment = 1 # think carefully before making more than one of the temperature dependencies true
+spawner_recruit_relationship = 0
+run_forecast=1
+time_varying_f = TRUE
+
+if(time_varying_f==TRUE){
 # the f-at-age data starts in 1982; fill in the previous years with the earliest year of data
 dat_f_age_prep <- read_csv(here("processed-data","summer_flounder_F_by_age.csv")) %>%
   rename_with(str_to_lower)
 f_early <- expand_grid(year=seq(1972, 1981, 1), age=unique(dat_f_age_prep$age)) %>% 
   left_join(dat_f_age_prep %>% filter(year==1982) %>% select(age, f)) 
 dat_f_age_prep <- bind_rows(dat_f_age_prep, f_early)
+}
 
 make_data_plots <- FALSE
 
@@ -71,32 +86,21 @@ if(make_data_plots==TRUE){
   # not sure this doesn't have any data in the other patches, maybe they are missing years? 
 }
 
-#############
-# make model decisions
-#############
-trim_to_abundant_patches=FALSE
-do_dirichlet = 1
-eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
-T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
-T_dep_recruitment = 1 # think carefully before making more than one of the temperature dependencies true
-spawner_recruit_relationship = 0
-run_forecast=1
-
 ##########
 # prep data for fitting
 ##########
 
 if(trim_to_abundant_patches==TRUE){
-# reshape fish data 
-use_patches <- dat %>% 
-  mutate(lat_floor = floor(lat)) %>% 
-  group_by(lat_floor) %>% 
-  summarise(total = sum(number_at_length)) %>% 
-  arrange(-total) %>% 
-  slice(1:7) # CHECK THIS MANUALLY TO BE SURE IT'S SANE, AND PATCHES ARE CONTIGUOUS
-
-patches <- sort(unique(use_patches$lat_floor))
-np = length(patches) 
+  # reshape fish data 
+  use_patches <- dat %>% 
+    mutate(lat_floor = floor(lat)) %>% 
+    group_by(lat_floor) %>% 
+    summarise(total = sum(number_at_length)) %>% 
+    arrange(-total) %>% 
+    slice(1:7) # CHECK THIS MANUALLY TO BE SURE IT'S SANE, AND PATCHES ARE CONTIGUOUS
+  
+  patches <- sort(unique(use_patches$lat_floor))
+  np = length(patches) 
 }
 
 if(trim_to_abundant_patches==FALSE){
@@ -157,6 +161,7 @@ patchdat <- dat %>%
   select(lat, lon) %>%
   distinct() %>%
   mutate(lat_floor = floor(lat)) %>% 
+  filter(lat_floor %in% use_patches$lat_floor) %>% 
   group_by(lat_floor) %>% 
   summarise(max_lon=max(lon),
             min_lon=min(lon)) %>% 
@@ -208,19 +213,18 @@ dat_test_sbt <- bind_rows(dat_test_sbt, sbt_test_fill)
 loo = 83.6
 k = 0.14
 m = 0.25
-#f = 0.334
-#z = exp(-m-f)
 age_at_maturity = 2
 t0=-.2
 cv= 0.2 # guess
 min_age = 0
 max_age = 20
 
+if(time_varying_f==TRUE){
 # now that we have the max_age, fill in f for years above 7 (since the f for age=7 is really for 7+)
 older_ages <- expand_grid(age=seq(max(dat_f_age_prep$age)+1, max_age, 1), year= unique(dat_f_age_prep$year)) %>% 
   left_join(dat_f_age_prep %>% filter(age==max(age)) %>% select(year, f))
-
 dat_f_age_prep %<>% bind_rows(older_ages)
+}
 
 # make length to age conversions
 length_at_age_key <-
@@ -250,12 +254,16 @@ l_at_a_mat <- length_at_age_key %>%
   as.matrix()
 
 # prep f data
-dat_f_age <- dat_f_age_prep %>% 
-  filter(year %in% years) 
-
-dat_f_age_proj <- dat_f_age_prep %>% 
-  filter(year %in% years_proj) %>%
-  bind_rows(dat_f_age %>% filter(year==max(year))) # need final year of training data to initialize projection
+if(time_varying_f==TRUE){
+  dat_f_age <- dat_f_age_prep %>% 
+    filter(year %in% years) 
+  
+  dat_f_age_proj <- dat_f_age_prep %>% 
+    filter(year %in% years_proj) %>%
+    bind_rows(dat_f_age %>% filter(year==max(year))) # need final year of training data to initialize projection
+} else {
+  f_prep=0.334
+}
 
 lbins <- unique(length_at_age_key$length_bin)
 # lbins <- sort(unique(dat_train_lengths$length))
@@ -288,8 +296,10 @@ dat_train_lengths$year = as.integer(as.factor(dat_train_lengths$year))
 #dat_test_lengths$year = as.integer(as.factor(dat_test_lengths$year))
 dat_test_sbt$year= as.integer(as.factor(dat_test_sbt$year))
 dat_train_sbt$year= as.integer(as.factor(dat_train_sbt$year))
-dat_f_age$year = as.integer(as.factor(dat_f_age$year))
-dat_f_age_proj$year = as.integer(as.factor(dat_f_age_proj$year))
+if(time_varying_f==TRUE){
+  dat_f_age$year = as.integer(as.factor(dat_f_age$year))
+  dat_f_age_proj$year = as.integer(as.factor(dat_f_age_proj$year))
+}
 
 # make matrices/arrays from dfs
 len <- array(0, dim = c(np, n_lbins, ny)) 
@@ -310,9 +320,9 @@ dens <- array(NA, dim=c(np, ny))
 for(p in 1:np){
   for(y in 1:ny){
     tmp2 <- dat_train_dens %>% filter(patch==p, year==y) 
-   #   left_join(patchdat, by = c("lat_floor","patch"))%>% 
-   #   mutate(mean_dens = mean_dens * patch_area_km2)
-   # dens[p,y] <- tmp2$mean_dens
+    #   left_join(patchdat, by = c("lat_floor","patch"))%>% 
+    #   mutate(mean_dens = mean_dens * patch_area_km2)
+    # dens[p,y] <- tmp2$mean_dens
     dens[p,y] <- tmp2$mean_dens *meanpatcharea
   }
 }
@@ -337,15 +347,23 @@ for(p in 1:np){
 f <- array(NA, dim=c(n_ages,ny))
 for(a in min_age:max_age){
   for(y in 1:ny){
-    tmp4 <- dat_f_age %>% filter(age==a, year==y) 
-    f[a+1,y] <- tmp4$f # add 1 because matrix indexing starts at 1 not 0
+    if(time_varying_f==TRUE){
+      tmp4 <- dat_f_age %>% filter(age==a, year==y) 
+      f[a+1,y] <- tmp4$f # add 1 because matrix indexing starts at 1 not 0
+    } else{
+      f[a+1,y] <- f_prep
+    }
   }
 }
 f_proj <- array(NA, dim=c(n_ages,(ny_proj+1)))
 for(a in min_age:max_age){
   for(y in 1:(ny_proj+1)){
-    tmp5 <- dat_f_age_proj %>% filter(age==a, year==y) 
-    f_proj[a+1,y] <- tmp5$f # add 1 because matrix indexing starts at 1 not 0
+    if(time_varying_f==TRUE){
+      tmp5 <- dat_f_age_proj %>% filter(age==a, year==y) 
+      f_proj[a+1,y] <- tmp5$f # add 1 because matrix indexing starts at 1 not 0
+    } else{
+      f_proj[a+1,y] <-f_prep
+    }
   }
 }
 
@@ -399,9 +417,9 @@ stan_model_fit <- stan(file = here::here("src","process_sdm_stock_recruit.stan")
                        data = stan_data,
                        chains = n_chains,
                        warmup = warmups,
-                  #     init = list(list(log_mean_recruits = log(1000),
-                  #                      theta_d = 1,
-                   #                     ssb0=1000000)),
+                       #     init = list(list(log_mean_recruits = log(1000),
+                       #                      theta_d = 1,
+                       #                     ssb0=1000000)),
                        iter = total_iterations,
                        cores = n_cores,
                        refresh = 250,
@@ -426,10 +444,10 @@ hist(extract(stan_model_fit, "mean_recruits")$mean_recruits)
 
 abund_p_y <- dat_train_dens %>%
   mutate(abundance = mean_dens * meanpatcharea) 
- # left_join(patchdat, by = c("lat_floor", "patch")) %>% 
- # group_by(patch, year) %>% 
- # summarise(abundance = sum(mean_dens *meanpatcharea)) %>% 
- # ungroup()
+# left_join(patchdat, by = c("lat_floor", "patch")) %>% 
+# group_by(patch, year) %>% 
+# summarise(abundance = sum(mean_dens *meanpatcharea)) %>% 
+# ungroup()
 
 
 abund_p_y_hat <- tidybayes::spread_draws(stan_model_fit, dens_p_y_hat[patch,year])
@@ -644,7 +662,7 @@ dat_train_lengths %>%
 dat_train_lengths %>% 
   ggplot(aes(x=year, y=sum_num_at_length, fill=length)) + 
   geom_bar(position="fill", stat="identity") +
-scale_fill_viridis_c() +
+  scale_fill_viridis_c() +
   theme_bw()  
 
 # plot temperature difference from optimum over space and time
@@ -664,9 +682,9 @@ proj_dens_p_y_hat <- gather_draws(stan_model_fit, proj_dens_p_y_hat[np, ny_proj]
 
 proj_abund_p_y <- dat_test_dens %>%
   mutate(abundance = mean_dens * meanpatcharea)
- # left_join(patchdat, by = c("lat_floor", "patch")) %>% 
- # group_by(patch, year) %>% 
- # summarise(abundance = sum(mean_dens *patch_area_km2)) %>% 
+# left_join(patchdat, by = c("lat_floor", "patch")) %>% 
+# group_by(patch, year) %>% 
+# summarise(abundance = sum(mean_dens *patch_area_km2)) %>% 
 #  ungroup()
 
 proj_observed_abundance_tile <- proj_abund_p_y %>% 
