@@ -30,6 +30,9 @@ dat_test <- read_csv(here("processed-data","flounder_catch_at_length_fall_testin
 # make model decisions
 #############
 trim_to_abundant_patches=FALSE
+if(trim_to_abundant_patches==TRUE){
+  focal_patch_n = 7 # adjust accordingly
+}
 do_dirichlet = 1
 eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
 T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
