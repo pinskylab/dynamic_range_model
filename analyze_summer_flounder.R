@@ -691,11 +691,13 @@ proj_abund_p_y <- dat_test_dens %>%
 #  ungroup()
 
 proj_observed_abundance_tile <- proj_abund_p_y %>% 
-  ggplot(aes(x=year, y=patch, fill=abundance)) +
+  mutate(Year = (year + min(years_proj) - 1), Latitude = (patch + min(patches) - 1), Abundance=abundance) %>% 
+  ggplot(aes(x=Year, y=Latitude, fill=Abundance)) +
   geom_tile() +
   theme_bw() +
-  scale_x_continuous(breaks=seq(0, 10, 2)) +
-  scale_y_continuous(breaks=seq(1, 7, 1)) +
+  scale_x_continuous(breaks=seq(min(years_proj), max(years_proj), 1)) +
+  scale_y_continuous(breaks=seq(min(patches), max(patches), 1)) +
+  scale_fill_continuous(labels = scales::comma) + # fine to comment this out if you don't have the package installed, it just makes the legend pretty
   labs(title="Observed")
 
 
@@ -704,14 +706,16 @@ proj_est_patch_abund <- proj_dens_p_y_hat %>%
   summarise(abundance = mean(.value))
 
 proj_estimated_abundance_tile <- proj_est_patch_abund %>% 
-  ggplot(aes(x=ny_proj, y=np, fill=abundance)) +
+  mutate(Year = (ny_proj + min(years_proj) - 1), Latitude = (np + min(patches) - 1), Abundance=abundance) %>% 
+  ggplot(aes(x=Year, y=Latitude, fill=Abundance)) +
   geom_tile() +
   theme_bw() +
-  scale_x_continuous(breaks=seq(0, 10, 2)) +
-  scale_y_continuous(breaks=seq(1, 7, 1)) +
-  labs(title="Estimated", x="year", y="patch")
-ggsave(proj_estimated_abundance_tile, filename=here("results","proj_estimated_abundance_v_time_tileplot.png"))
-ggsave(proj_observed_abundance_tile, filename=here("results","proj_observed_abundance_v_time_tileplot.png"))
+  scale_x_continuous(breaks=seq(min(years_proj), max(years_proj), 1)) +
+  scale_y_continuous(breaks=seq(min(patches), max(patches), 1)) +
+  scale_fill_continuous(labels = scales::comma) + # fine to comment this out if you don't have the package installed, it just makes the legend pretty
+  labs(title="Estimated")
+ggsave(proj_estimated_abundance_tile, filename=here("results","proj_estimated_abundance_v_time_tileplot.png"), scale=0.9)
+ggsave(proj_observed_abundance_tile, filename=here("results","proj_observed_abundance_v_time_tileplot.png"), scale=0.9)
 
 proj_abundance_v_time <- proj_dens_p_y_hat %>% 
   rename(patch=np) %>% 
@@ -728,7 +732,8 @@ ggsave(proj_abundance_v_time, filename=here("results","proj_density_v_time.png")
 # centroid position by year 
 dat_centroid_proj <- proj_abund_p_y %>% 
   group_by(year) %>% 
-  summarise(centroid_lat = weighted.mean(x=patch, w=abundance))
+  summarise(centroid_lat = weighted.mean(x=patch, w=abundance)) %>%
+  mutate(Year = (year + min(years_proj) - 1), Latitude = (centroid_lat + min(patches) - 1))
 
 # model fit centroid -- should eventually estimate in model for proper SE -- just exploring here
 est_centroid_proj <- proj_dens_p_y_hat %>% 
@@ -736,10 +741,23 @@ est_centroid_proj <- proj_dens_p_y_hat %>%
   summarise(centroid_lat = weighted.mean(x=np, w=.value)) %>% 
   ungroup()
 
+gg_centroid_proj_prep <- dat_centroid_proj %>% 
+  ggplot(aes(Year, Latitude)) + 
+  geom_point(color = "red") +
+  scale_x_continuous(breaks=seq(min(years_proj), max(years_proj), 1)) +
+  scale_y_continuous(breaks=seq(37.6, 39.2, 0.2), limits=c(37.6, 39.2)) +
+  theme(legend.position = "none") +
+  labs(title="Centroid Position") 
+
 gg_centroid_proj <- est_centroid_proj %>% 
-  ggplot(aes(ny_proj, centroid_lat)) + 
+  mutate(Year = (ny_proj + min(years_proj) - 1), Latitude = (centroid_lat + min(patches) - 1)) %>% 
+  ggplot(aes(Year, Latitude)) + 
   stat_lineribbon() + 
   scale_fill_brewer() +
-  geom_point(data = dat_centroid_proj, aes(year, centroid_lat), color = "red") +
-  theme(legend.position = "none")
-ggsave(gg_centroid_proj, filename=here("results","proj_centroid_v_time.png"))
+  geom_point(data = dat_centroid_proj, aes(Year, Latitude), color = "red") +
+  scale_x_continuous(breaks=seq(min(years_proj), max(years_proj), 1)) +
+  scale_y_continuous(breaks=seq(37.6, 39.2, 0.2)) +
+  theme(legend.position = "none") +
+  labs(title="Centroid Position") 
+ggsave(gg_centroid_proj_prep, filename=here("results","proj_centroid_v_time_prep.png"), scale=0.9)
+ggsave(gg_centroid_proj, filename=here("results","proj_centroid_v_time.png"), scale=0.9)
