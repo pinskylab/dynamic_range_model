@@ -1,6 +1,10 @@
 #############
 # load packages and data
 #############
+# STILL NEED TO FIX:
+# TIME VARYING F
+# WEIGHT AT AGE
+# FIT UPDATED MODEL, NOT OLD ONE
 
 set.seed(42)
 library(tidyverse)
@@ -15,40 +19,40 @@ library(rstanarm)
 library(geosphere)
 library(ggridges)
 library(purrr)
-
 funs <- list.files("functions")
 sapply(funs, function(x) source(file.path("functions",x)))
 
 rstan_options(javascript=FALSE, auto_write =TRUE)
 
-dat <- read_csv(here("processed-data","flounder_catch_at_length_fall_training.csv"))
+dat <- read_csv(here("processed-data","dogfish_catch_at_length_fall_training.csv"))
 # dat %<>% filter(length >17)
-dat_test <- read_csv(here("processed-data","flounder_catch_at_length_fall_testing.csv"))
-
+dat_test <- read_csv(here("processed-data","dogfish_catch_at_length_fall_testing.csv"))
 
 #############
 # make model decisions
 #############
+# the 0s and 1s are for Stan
 trim_to_abundant_patches=FALSE
 if(trim_to_abundant_patches==TRUE){
-  focal_patch_n = 7 # adjust accordingly
+  focal_patch_n = 4 # adjust accordingly
 }
 do_dirichlet = 1
 eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
 T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
 T_dep_recruitment = 1 # think carefully before making more than one of the temperature dependencies true
 spawner_recruit_relationship = 0
-run_forecast=1
-time_varying_f = TRUE
+run_forecast=0
+time_varying_f=FALSE
 
-if(time_varying_f==TRUE){
-# the f-at-age data starts in 1982; fill in the previous years with the earliest year of data
-dat_f_age_prep <- read_csv(here("processed-data","summer_flounder_F_by_age.csv")) %>%
-  rename_with(str_to_lower)
-f_early <- expand_grid(year=seq(1972, 1981, 1), age=unique(dat_f_age_prep$age)) %>% 
-  left_join(dat_f_age_prep %>% filter(year==1982) %>% select(age, f)) 
-dat_f_age_prep <- bind_rows(dat_f_age_prep, f_early)
-}
+# if(time_varying_f==TRUE){
+# # currently for spiny dogfish we only have F by sex (not age), and only starting in 1990
+# # HAVEN'T FINISHED THIS CODE BECAUSE AS PER TABLE 4.1 P57 SAW43 FISHING MORTALITY WAS HUGELY VARIABLE FROM 1972-1990 -- TRY TO GET F DATA EARLIER
+# dat_f_prep <- read_csv(here("processed-data","spiny_dogfish_F.csv")) %>%
+#   rename_with(str_to_lower)
+# f_early <- expand_grid(year=seq(1972, 1981, 1), age=unique(dat_f_age_prep$age)) %>%
+#   left_join(dat_f_age_prep %>% filter(year==1982) %>% select(age, f))
+# dat_f_age_prep <- bind_rows(dat_f_age_prep, f_early)
+# }
 
 make_data_plots <- FALSE
 
@@ -59,6 +63,8 @@ if(make_data_plots==TRUE){
     filter(between(lat_floor, 37,41)) %>% 
     group_by(length, year, lat_floor) %>% 
     summarise(total = sum(number_at_length)) %>% 
+    ungroup() %>% 
+    mutate(total = recode(as.numeric(total), `0` = 1e-10)) %>% # adding because there were zeros causing the weights argument below to throw an error
     mutate(year = as.character(year)) %>% 
     ggplot(aes(x=length, y=year)) +
     geom_density_ridges(aes(height=..density..,
@@ -68,14 +74,15 @@ if(make_data_plots==TRUE){
     scale_y_discrete(expand = c(0, 0))  + 
     facet_wrap(~lat_floor) + 
     coord_flip()
-  # gglength  
-  ggsave(gglength, filename=here("results","summer_flounder_length_freq.png"))
+   gglength  
+  ggsave(gglength, filename=here("results","spiny_dogfish_length_freq.png"))
   
   # by patch -- 
   ggpatchlength <- dat %>% 
     mutate(lat_floor = floor(lat)) %>% 
     group_by(length, lat_floor, year) %>% 
     summarise(total = sum(number_at_length)) %>% 
+    mutate(total = recode(as.numeric(total), `0` = 1e-10)) %>% # adding because there were zeros causing the weights argument below to throw an error
     mutate(year = as.character(year)) %>% 
     ggplot(aes(x=length, y=year)) +
     geom_density_ridges(aes(height=..density..,
@@ -84,8 +91,8 @@ if(make_data_plots==TRUE){
                         stat="density") +
     scale_y_discrete(expand = c(0, 0)) +
     facet_wrap(~lat_floor, scales = "free_y")
-  # ggpatchlength  
-  ggsave(ggpatchlength, filename=here("results","summer_flounder_length_freq_by_patch.png"), height=8, width=5, dpi=160)
+   ggpatchlength  
+  ggsave(ggpatchlength, filename=here("results","spiny_dogfish_length_freq_by_patch.png"), height=8, width=5, dpi=160)
   # not sure this doesn't have any data in the other patches, maybe they are missing years? 
 }
 
@@ -100,7 +107,7 @@ if(trim_to_abundant_patches==TRUE){
     group_by(lat_floor) %>% 
     summarise(total = sum(number_at_length)) %>% 
     arrange(-total) %>% 
-    slice(1:7) # CHECK THIS MANUALLY TO BE SURE IT'S SANE, AND PATCHES ARE CONTIGUOUS
+    slice(1:focal_patch_n) 
   
   patches <- sort(unique(use_patches$lat_floor))
   np = length(patches) 
@@ -198,8 +205,8 @@ dat_test_sbt <- dat_test %>%
 nrow(dat_train_sbt)==(np*ny)
 nrow(dat_test_sbt) == (np*ny_proj) 
 
-# some SBT data are missing: lat 35, 36, and 37 in 2008
-# THIS IS VERY HARD CODED! DANGER
+#some SBT data are missing: lat 35, 36, and 37 in 2008
+#THIS IS VERY HARD CODED! DANGER
 library(lme4)
 sbt_lme <- lmer(btemp ~ lat + (1|year), data=bind_rows(dat, dat_test))
 sbt_test_fill <- data.frame(
@@ -212,22 +219,22 @@ sbt_test_fill <- data.frame(
   ))
 dat_test_sbt <- bind_rows(dat_test_sbt, sbt_test_fill)
 
-# set fixed parameters from stock assessment
-loo = 83.6
-k = 0.14
-m = 0.25
-age_at_maturity = 2
-t0=-.2
+# set fixed parameters from stock assessment (SAW 43)
+# NOTE THAT THESE ALL VARY BY SEX FOR SPINY DOGFISH; VALUES BELOW ARE IN BETWEEN MALES AND FEMALES FOR loo, age_at_maturity
+loo = 110 # p41
+k = 0.1128 # p41
+m = 0.092 #p48
+age_at_maturity = 12 #p17
+t0=-2.552 # p41
 cv= 0.2 # guess
 min_age = 0
-max_age = 20
+max_age = 50 #p17
 
-if(time_varying_f==TRUE){
 # now that we have the max_age, fill in f for years above 7 (since the f for age=7 is really for 7+)
-older_ages <- expand_grid(age=seq(max(dat_f_age_prep$age)+1, max_age, 1), year= unique(dat_f_age_prep$year)) %>% 
-  left_join(dat_f_age_prep %>% filter(age==max(age)) %>% select(year, f))
-dat_f_age_prep %<>% bind_rows(older_ages)
-}
+# older_ages <- expand_grid(age=seq(max(dat_f_age_prep$age)+1, max_age, 1), year= unique(dat_f_age_prep$year)) %>% 
+#   left_join(dat_f_age_prep %>% filter(age==max(age)) %>% select(year, f))
+# 
+# dat_f_age_prep %<>% bind_rows(older_ages)
 
 # make length to age conversions
 length_at_age_key <-
@@ -256,17 +263,13 @@ l_at_a_mat <- length_at_age_key %>%
   select(-age) %>% 
   as.matrix()
 
-# prep f data
-if(time_varying_f==TRUE){
-  dat_f_age <- dat_f_age_prep %>% 
-    filter(year %in% years) 
-  
-  dat_f_age_proj <- dat_f_age_prep %>% 
-    filter(year %in% years_proj) %>%
-    bind_rows(dat_f_age %>% filter(year==max(year))) # need final year of training data to initialize projection
-} else {
-  f_prep=0.334
-}
+# # prep f data
+# dat_f_age <- dat_f_age_prep %>% 
+#   filter(year %in% years) 
+# 
+# dat_f_age_proj <- dat_f_age_prep %>% 
+#   filter(year %in% years_proj) %>%
+#   bind_rows(dat_f_age %>% filter(year==max(year))) # need final year of training data to initialize projection
 
 lbins <- unique(length_at_age_key$length_bin)
 # lbins <- sort(unique(dat_train_lengths$length))
@@ -277,18 +280,18 @@ n_ages <- nrow(l_at_a_mat)
 # now that we have n_ages, calculate weight at age
 # THIS IS VERY HARD CODED, AND ALSO NOT PROBABILISTIC
 # NEED TO FIX
-wt_at_age_prep <- read_csv(here("processed-data","summer_flounder_wt_at_age.csv")) %>% 
-  filter(!Age %in% seq(7, 10, 1)) %>% 
-  mutate(Age = gsub("over7",7,Age),
-         Age = as.numeric(Age),
-         Age = Age + 1) %>% # start at 1 not 0
-  group_by(Age) %>% 
-  summarise(wt = mean(Wt)) %>% # average over all years 
-  ungroup() %>% 
-  arrange(Age)
-# fill in plus ages
-wt_at_age_add <- data.frame(Age = seq(max(wt_at_age_prep+1),n_ages,1), wt = slice_tail(wt_at_age_prep)$wt)
-wt_at_age <- rbind(wt_at_age_prep, wt_at_age_add)$wt
+# wt_at_age_prep <- read_csv(here("processed-data","summer_flounder_wt_at_age.csv")) %>% 
+#   filter(!Age %in% seq(7, 10, 1)) %>% 
+#   mutate(Age = gsub("over7",7,Age),
+#          Age = as.numeric(Age),
+#          Age = Age + 1) %>% # start at 1 not 0
+#   group_by(Age) %>% 
+#   summarise(wt = mean(Wt)) %>% # average over all years 
+#   ungroup() %>% 
+#   arrange(Age)
+# # fill in plus ages
+# wt_at_age_add <- data.frame(Age = seq(max(wt_at_age_prep+1),n_ages,1), wt = slice_tail(wt_at_age_prep)$wt)
+# wt_at_age <- rbind(wt_at_age_prep, wt_at_age_add)$wt
 
 # now that years are defined above, convert them into indices in the datasets
 # be sure all these dataframes have exactly the same year range! 
@@ -299,10 +302,8 @@ dat_train_lengths$year = as.integer(as.factor(dat_train_lengths$year))
 #dat_test_lengths$year = as.integer(as.factor(dat_test_lengths$year))
 dat_test_sbt$year= as.integer(as.factor(dat_test_sbt$year))
 dat_train_sbt$year= as.integer(as.factor(dat_train_sbt$year))
-if(time_varying_f==TRUE){
-  dat_f_age$year = as.integer(as.factor(dat_f_age$year))
-  dat_f_age_proj$year = as.integer(as.factor(dat_f_age_proj$year))
-}
+# dat_f_age$year = as.integer(as.factor(dat_f_age$year))
+# dat_f_age_proj$year = as.integer(as.factor(dat_f_age_proj$year))
 
 # make matrices/arrays from dfs
 len <- array(0, dim = c(np, n_lbins, ny)) 
@@ -345,27 +346,21 @@ for(p in 1:np){
     sbt_proj[p,y] <- tmp6$sbt
   }
 }
-
-
+# 
+# 
 f <- array(NA, dim=c(n_ages,ny))
 for(a in min_age:max_age){
   for(y in 1:ny){
-    if(time_varying_f==TRUE){
-      tmp4 <- dat_f_age %>% filter(age==a, year==y) 
-      f[a+1,y] <- tmp4$f # add 1 because matrix indexing starts at 1 not 0
-    } else{
-      f[a+1,y] <- f_prep
+    if(time_varying_f==FALSE){
+      f[a+1,y] <- 0.128 # FIX LATER, RANDOM PULL FROM STOCK ASSESSMENT
     }
   }
 }
 f_proj <- array(NA, dim=c(n_ages,(ny_proj+1)))
 for(a in min_age:max_age){
   for(y in 1:(ny_proj+1)){
-    if(time_varying_f==TRUE){
-      tmp5 <- dat_f_age_proj %>% filter(age==a, year==y) 
-      f_proj[a+1,y] <- tmp5$f # add 1 because matrix indexing starts at 1 not 0
-    } else{
-      f_proj[a+1,y] <-f_prep
+    if(time_varying_f==FALSE){
+    f_proj[a+1,y] <- 0.128# FIX LATER, RANDOM PULL FROM STOCK ASSESSMENT
     }
   }
 }
@@ -373,6 +368,7 @@ for(a in min_age:max_age){
 a <- seq(min_age, max_age)
 
 check <- a %*% l_at_a_mat
+
 ######
 # fit model
 ######
@@ -398,16 +394,13 @@ stan_data <- list(
   n_lbins = n_lbins, 
   age_sel = 0,
   bin_mids=lbins+0.5, # also not sure if this is the right way to calculate the midpoints
-  sel_100 = 3, # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
+  sel_100 = 1, # REVISIT
   age_at_maturity = age_at_maturity,
   l_at_a_key = l_at_a_mat,
-  wt_at_age = wt_at_age,
   do_dirichlet = do_dirichlet,
   eval_l_comps = eval_l_comps, # evaluate length composition data? 0=no, 1=yes
   T_dep_mortality = T_dep_mortality, # CURRENTLY NOT REALLY WORKING
-  T_dep_recruitment = T_dep_recruitment, # think carefully before making more than one of the temperature dependencies true
-  spawner_recruit_relationship = spawner_recruit_relationship, 
-  run_forecast=run_forecast
+  T_dep_recruitment = T_dep_recruitment # think carefully before making more than one of the temperature dependencies true
 )
 
 warmups <- 1000
@@ -416,13 +409,10 @@ max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
 
-stan_model_fit <- stan(file = here::here("src","process_sdm_stock_recruit.stan"), # check that it's the right model!
+stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!
                        data = stan_data,
                        chains = n_chains,
                        warmup = warmups,
-                       #     init = list(list(log_mean_recruits = log(1000),
-                       #                      theta_d = 1,
-                       #                     ssb0=1000000)),
                        iter = total_iterations,
                        cores = n_cores,
                        refresh = 250,
@@ -691,13 +681,11 @@ proj_abund_p_y <- dat_test_dens %>%
 #  ungroup()
 
 proj_observed_abundance_tile <- proj_abund_p_y %>% 
-  mutate(Year = (year + min(years_proj) - 1), Latitude = (patch + min(patches) - 1), Abundance=abundance) %>% 
-  ggplot(aes(x=Year, y=Latitude, fill=Abundance)) +
+  ggplot(aes(x=year, y=patch, fill=abundance)) +
   geom_tile() +
   theme_bw() +
-  scale_x_continuous(breaks=seq(min(years_proj), max(years_proj), 1)) +
-  scale_y_continuous(breaks=seq(min(patches), max(patches), 1)) +
-  scale_fill_continuous(labels = scales::comma) + # fine to comment this out if you don't have the package installed, it just makes the legend pretty
+  scale_x_continuous(breaks=seq(0, 10, 2)) +
+  scale_y_continuous(breaks=seq(1, 7, 1)) +
   labs(title="Observed")
 
 
@@ -706,16 +694,14 @@ proj_est_patch_abund <- proj_dens_p_y_hat %>%
   summarise(abundance = mean(.value))
 
 proj_estimated_abundance_tile <- proj_est_patch_abund %>% 
-  mutate(Year = (ny_proj + min(years_proj) - 1), Latitude = (np + min(patches) - 1), Abundance=abundance) %>% 
-  ggplot(aes(x=Year, y=Latitude, fill=Abundance)) +
+  ggplot(aes(x=ny_proj, y=np, fill=abundance)) +
   geom_tile() +
   theme_bw() +
-  scale_x_continuous(breaks=seq(min(years_proj), max(years_proj), 1)) +
-  scale_y_continuous(breaks=seq(min(patches), max(patches), 1)) +
-  scale_fill_continuous(labels = scales::comma) + # fine to comment this out if you don't have the package installed, it just makes the legend pretty
-  labs(title="Estimated")
-ggsave(proj_estimated_abundance_tile, filename=here("results","proj_estimated_abundance_v_time_tileplot.png"), scale=0.9)
-ggsave(proj_observed_abundance_tile, filename=here("results","proj_observed_abundance_v_time_tileplot.png"), scale=0.9)
+  scale_x_continuous(breaks=seq(0, 10, 2)) +
+  scale_y_continuous(breaks=seq(1, 7, 1)) +
+  labs(title="Estimated", x="year", y="patch")
+ggsave(proj_estimated_abundance_tile, filename=here("results","proj_estimated_abundance_v_time_tileplot.png"))
+ggsave(proj_observed_abundance_tile, filename=here("results","proj_observed_abundance_v_time_tileplot.png"))
 
 proj_abundance_v_time <- proj_dens_p_y_hat %>% 
   rename(patch=np) %>% 
@@ -732,8 +718,7 @@ ggsave(proj_abundance_v_time, filename=here("results","proj_density_v_time.png")
 # centroid position by year 
 dat_centroid_proj <- proj_abund_p_y %>% 
   group_by(year) %>% 
-  summarise(centroid_lat = weighted.mean(x=patch, w=abundance)) %>%
-  mutate(Year = (year + min(years_proj) - 1), Latitude = (centroid_lat + min(patches) - 1))
+  summarise(centroid_lat = weighted.mean(x=patch, w=abundance))
 
 # model fit centroid -- should eventually estimate in model for proper SE -- just exploring here
 est_centroid_proj <- proj_dens_p_y_hat %>% 
@@ -741,23 +726,10 @@ est_centroid_proj <- proj_dens_p_y_hat %>%
   summarise(centroid_lat = weighted.mean(x=np, w=.value)) %>% 
   ungroup()
 
-gg_centroid_proj_prep <- dat_centroid_proj %>% 
-  ggplot(aes(Year, Latitude)) + 
-  geom_point(color = "red") +
-  scale_x_continuous(breaks=seq(min(years_proj), max(years_proj), 1)) +
-  scale_y_continuous(breaks=seq(37.6, 39.2, 0.2), limits=c(37.6, 39.2)) +
-  theme(legend.position = "none") +
-  labs(title="Centroid Position") 
-
 gg_centroid_proj <- est_centroid_proj %>% 
-  mutate(Year = (ny_proj + min(years_proj) - 1), Latitude = (centroid_lat + min(patches) - 1)) %>% 
-  ggplot(aes(Year, Latitude)) + 
+  ggplot(aes(ny_proj, centroid_lat)) + 
   stat_lineribbon() + 
   scale_fill_brewer() +
-  geom_point(data = dat_centroid_proj, aes(Year, Latitude), color = "red") +
-  scale_x_continuous(breaks=seq(min(years_proj), max(years_proj), 1)) +
-  scale_y_continuous(breaks=seq(37.6, 39.2, 0.2)) +
-  theme(legend.position = "none") +
-  labs(title="Centroid Position") 
-ggsave(gg_centroid_proj_prep, filename=here("results","proj_centroid_v_time_prep.png"), scale=0.9)
-ggsave(gg_centroid_proj, filename=here("results","proj_centroid_v_time.png"), scale=0.9)
+  geom_point(data = dat_centroid_proj, aes(year, centroid_lat), color = "red") +
+  theme(legend.position = "none")
+ggsave(gg_centroid_proj, filename=here("results","proj_centroid_v_time.png"))
