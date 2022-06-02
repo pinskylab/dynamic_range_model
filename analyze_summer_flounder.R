@@ -36,9 +36,10 @@ if(trim_to_abundant_patches==TRUE){
 do_dirichlet = 1
 eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
 T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
-T_dep_recruitment = 1 # think carefully before making more than one of the temperature dependencies true
+T_dep_recruitment = 0 # think carefully before making more than one of the temperature dependencies true
+T_dep_movement = 1
 spawner_recruit_relationship = 0
-run_forecast=1
+run_forecast=0
 time_varying_f = TRUE
 
 if(time_varying_f==TRUE){
@@ -405,10 +406,11 @@ stan_data <- list(
   do_dirichlet = do_dirichlet,
   eval_l_comps = eval_l_comps, # evaluate length composition data? 0=no, 1=yes
   T_dep_mortality = T_dep_mortality, # CURRENTLY NOT REALLY WORKING
-  T_dep_recruitment = T_dep_recruitment, # think carefully before making more than one of the temperature dependencies true
+  T_dep_recruitment = T_dep_recruitment, # think carefully before making more than one of the temperature dependencies true,
+  T_dep_movement = T_dep_movement,
   spawner_recruit_relationship = spawner_recruit_relationship, 
   run_forecast=run_forecast
-)
+  )
 
 warmups <- 1000
 total_iterations <- 2000
@@ -416,7 +418,7 @@ max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
 
-stan_model_fit <- stan(file = here::here("src","process_sdm_stock_recruit.stan"), # check that it's the right model!
+stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"), # check that it's the right model!
                        data = stan_data,
                        chains = n_chains,
                        warmup = warmups,

@@ -28,10 +28,20 @@ functions {
     } // close lengths
     return prob_age_at_length;
   } // close function
+
+  vector colSums(matrix M){
+    int ncol; 
+    vector[cols(M)] sums; 
+    
+    ncol = cols(M); 
+    
+    for(i in 1:ncol){
+      sums[i] = sum(M[,i]); //sums[i] = sum(col(M,i)); 
+    }
+    return(sums);
+  }
   
 } // close functions block
-
-
 
 data {
   
@@ -89,21 +99,40 @@ data {
   
   int<lower = 0, upper = 1> T_dep_mortality;
   
+    int<lower = 0, upper = 1> T_dep_movement;
+  
   int<lower = 0, upper = 1> eval_l_comps;
   
   int<lower = 0, upper = 1> spawner_recruit_relationship;
   
-    int<lower = 0, upper = 1> run_forecast;
-
+  int<lower = 0, upper = 1> run_forecast;
   
   int n_p_l_y[np, n_lbins, ny_train]; // SUM number of individuals in each length bin, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
-  
   
 }
 
 transformed data{
   
   vector[n_ages] maturity_at_age; // vector of probabilities of being mature at each age, currently binary (0/1) and taken as known
+  
+  matrix[np, np] adj_m; // adjacency matrix for patches 
+  
+  matrix[np, np] outer; // outer difference matrix 
+  
+  // in R this is just outer(np, np, "-") 
+  for(i in 1:np){
+    for(j in 1:np){
+      outer[i, j] = i - j; // should just create a matrix that counts from 1 to np along rows and columns
+      if(fabs(outer[i,j])==1) {
+        adj_m[i,j] = 1; // fill with 1s for adjacent patches and 0s otherwise 
+      }else{
+        adj_m[i,j] = 0; 
+      }
+    }
+  }
+  
+  print("the outer matrix is ",outer); 
+  print("the adjacency matrix is ",adj_m); 
   
   for(a in 1:n_ages){
     if(a < age_at_maturity){
@@ -164,7 +193,9 @@ parameters{
   
   real<lower=0, upper=1> beta_obs; // controls how fast detection goes up with abundance
   
-  real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
+  // real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
+  
+  real<lower=0, upper=1> d; // increasing bounds on this for the temperature-dependent movement model 
   
   real <lower = 0> theta_d;
   
@@ -176,7 +207,7 @@ parameters{
 
 transformed parameters{
   
-  real T_adjust[np, ny_train]; // tuning parameter for sbt suitability in each patch*year
+  matrix[np, ny_train] T_adjust; // tuning parameter for sbt suitability in each patch*year
   
   real length_50_sel;
   
@@ -198,6 +229,16 @@ transformed parameters{
   
   real surv[np, n_ages, ny_train];
   
+  matrix[np, np] diff_m; // dispersal matrix (setting up for temperature-dependent movement, but doesn't actually need to vary by year)
+  
+  matrix[np, np] mov_inst_m[ny_train]; // array containing instantaneous movement matrices (dispersal + temperature-dependent taxis)
+  
+  matrix[np, np] mov_m[ny_train]; // array containing annualized movement matrices (dispersal + temperature-dependent taxis)
+  
+  matrix[np, np] T_adjust_m[ny_train]; // array containing temperature preference matrices
+  
+  matrix[np, np] tax_m[ny_train]; // array containing taxis between patches every year 
+  
   real ssb0;
   
   vector[n_ages] unfished;
@@ -209,7 +250,7 @@ transformed parameters{
   real<lower=0> r0;
   
   r0 = exp(log_r0);
-
+  
   ssb0 = -999;
   
   for(a in 1:n_ages){
@@ -260,7 +301,6 @@ transformed parameters{
   
   
   // calculate total annual mortality from instantaneous natural + fishing mortality data 
-  // note that z is the proportion that survive, 1-z is the proportion that die 
   
   for(p in 1:np){
     for(a in 1:n_ages){
@@ -278,6 +318,27 @@ transformed parameters{
     }
   }
   
+  //  calculate annual movement matrix if using spatially varying dispersal
+  if(T_dep_movement==1){
+    
+    diff_m = adj_m * d; // set up matrix as adjacency * dispersal
+    diff_m = add_diag(diff_m, -1 * colSums(diff_m)); // rescale the columns so they will sum to 1 at the end
+    
+    // set up array of matrices containing 
+    for(y in 1:ny_train){
+      for(i in 1:np){
+        for(j in 1:np){
+          // in R this is just outer(np, np, "-") 
+          T_adjust_m[y,i,j] = T_adjust[i,y] - T_adjust[j,y]; 
+        }
+      }
+      tax_m[y] = adj_m .* T_adjust_m[y]; 
+      tax_m[y] = add_diag(tax_m[y], -1 * colSums(tax_m[y])); // fill in the diagonal with within-patch "taxis" so everything sums to 1 
+      mov_inst_m[y] = diff_m + tax_m[y]; // movement as a sum of diffusion and taxis (can cancel each other out)
+      mov_m[y] = matrix_exp(mov_inst_m[y]); // matrix exponentiate, although see https://discourse.mc-stan.org/t/matrix-exponential-function/9595
+      print("the annualized movement matrix in year ",y," is ",mov_m[y]);
+    }
+  }
   
   // fill in year 1 of n_p_a_y_hat, initialized with mean_recruits 
   for(p in 1:np){
@@ -526,97 +587,97 @@ model {
 
 
 generated quantities {
-  real proj_n_p_a_y_hat[np, n_ages, ny_proj+1];
-  real T_adjust_proj[np, ny_proj];
-  vector[ny_proj] rec_dev_proj;
-  vector[ny_proj] raw_proj;
-  real surv_proj[n_ages, (ny_proj+1)];
-  matrix[np, n_lbins] proj_n_p_l_y_hat[ny_proj];
-  real proj_dens_p_y_hat [np, ny_proj];
-
-
-  if(run_forecast==1){
-  for(p in 1:np){
-    for(y in 1:ny_proj){
-      T_adjust_proj[p,y] = T_dep(sbt_proj[p,y], Topt, width);
-    } // close years
-  } // close patches
-
-  for(p in 1:np){
-    for(a in 1:n_ages){
-      for(y in 1:(ny_proj+1)){
-
-        if(T_dep_mortality==0){
-          surv_proj[a,y] = exp(-(f_proj[a,y] + m));
-        }
-        if(T_dep_mortality==1){
-          surv_proj[a,y] = exp(-(f_proj[a,y] + m))* T_adjust_proj[p,y];
-
-        }
-      }
-    }
-  }
-
-  // initialize with final year of our model
-  proj_n_p_a_y_hat[,,1] = n_p_a_y_hat[,,ny_train];
-  rec_dev_proj[1] = rec_dev[ny_train-1];
-  raw_proj[1] = raw[ny_train];
-
-  // project pop dy
-  for(y in 2:ny_proj){
-    raw_proj[y] = normal_rng(0, sigma_r);
-    //  print("raw_proj in year ",y," is ",raw_proj[y]);
-    rec_dev_proj[y] = alpha * rec_dev_proj[y-1] + raw_proj[y];
-    //  print("rec_dev_proj in year ",y," is ",rec_dev_proj[y]);
-
-  }
-
-  for(y in 2:(ny_proj+1)){
-    for(p in 1:np){
-
-      if(T_dep_recruitment==1){
-        proj_n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2) * T_adjust_proj[p,y-1];
-      }
-      if(T_dep_recruitment==0){
-        proj_n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2);
-      }
-
-      if(age_at_maturity > 1){
-        for(a in 2:(age_at_maturity-1)){
-          proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * surv_proj[a-1,y-1];
-        } // close ages for 2 to age at maturity
-      } // close if
-
-      for(a in age_at_maturity:n_ages){
-        if(p==1){
-          proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * surv_proj[a-1,y-1] * (1-d) + proj_n_p_a_y_hat[p+1, a-1, y-1] * surv_proj[a-1,y-1] * d;
-        } // close patch 1 case
-
-        else if(p==np){
-          proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * surv_proj[a-1,y-1] * (1-d) + proj_n_p_a_y_hat[p-1, a-1, y-1] * surv_proj[a-1,y-1] * d;
-        } // close highest patch
-
-        else{
-          proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * surv_proj[a-1,y-1] * (1-2*d) + proj_n_p_a_y_hat[p-1, a-1, y-1] * surv_proj[a-1,y-1] * d + proj_n_p_a_y_hat[p+1, a-1, y-1] * surv_proj[a-1,y-1] * d;
-
-        } // close if/else for all other patches
-
-      }// close ages
-    } // close patches
-
-
-  } // close year 2+ loop
-
-  for(p in 1:np){
-    for(y in 1:(ny_proj)){
-
-      proj_n_p_l_y_hat[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(proj_n_p_a_y_hat[p,1:n_ages,y])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
-      proj_dens_p_y_hat[p,y] = sum((to_vector(proj_n_p_l_y_hat[y,p,1:n_lbins])));
-
-    }
-  }
-}
-
+  // real proj_n_p_a_y_hat[np, n_ages, ny_proj+1];
+  // real T_adjust_proj[np, ny_proj];
+  // vector[ny_proj] rec_dev_proj;
+  // vector[ny_proj] raw_proj;
+  // real surv_proj[n_ages, (ny_proj+1)];
+  // matrix[np, n_lbins] proj_n_p_l_y_hat[ny_proj];
+  // real proj_dens_p_y_hat [np, ny_proj];
+  // 
+  // 
+  // if(run_forecast==1){
+  //   for(p in 1:np){
+  //     for(y in 1:ny_proj){
+  //       T_adjust_proj[p,y] = T_dep(sbt_proj[p,y], Topt, width);
+  //     } // close years
+  //   } // close patches
+  //   
+  //   for(p in 1:np){
+  //     for(a in 1:n_ages){
+  //       for(y in 1:(ny_proj+1)){
+  //         
+  //         if(T_dep_mortality==0){
+  //           surv_proj[a,y] = exp(-(f_proj[a,y] + m));
+  //         }
+  //         if(T_dep_mortality==1){
+  //           surv_proj[a,y] = exp(-(f_proj[a,y] + m))* T_adjust_proj[p,y];
+  //           
+  //         }
+  //       }
+  //     }
+  //   }
+  //   
+  //   // initialize with final year of our model
+  //   proj_n_p_a_y_hat[,,1] = n_p_a_y_hat[,,ny_train];
+  //   rec_dev_proj[1] = rec_dev[ny_train-1];
+  //   raw_proj[1] = raw[ny_train];
+  //   
+  //   // project pop dy
+  //   for(y in 2:ny_proj){
+  //     raw_proj[y] = normal_rng(0, sigma_r);
+  //     //  print("raw_proj in year ",y," is ",raw_proj[y]);
+  //     rec_dev_proj[y] = alpha * rec_dev_proj[y-1] + raw_proj[y];
+  //     //  print("rec_dev_proj in year ",y," is ",rec_dev_proj[y]);
+  //     
+  //   }
+  //   
+  //   for(y in 2:(ny_proj+1)){
+  //     for(p in 1:np){
+  //       
+  //       if(T_dep_recruitment==1){
+  //         proj_n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2) * T_adjust_proj[p,y-1];
+  //       }
+  //       if(T_dep_recruitment==0){
+  //         proj_n_p_a_y_hat[p,1,y] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2);
+  //       }
+  //       
+  //       if(age_at_maturity > 1){
+  //         for(a in 2:(age_at_maturity-1)){
+  //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * surv_proj[a-1,y-1];
+  //         } // close ages for 2 to age at maturity
+  //       } // close if
+  //       
+  //       for(a in age_at_maturity:n_ages){
+  //         if(p==1){
+  //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * surv_proj[a-1,y-1] * (1-d) + proj_n_p_a_y_hat[p+1, a-1, y-1] * surv_proj[a-1,y-1] * d;
+  //         } // close patch 1 case
+  //         
+  //         else if(p==np){
+  //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * surv_proj[a-1,y-1] * (1-d) + proj_n_p_a_y_hat[p-1, a-1, y-1] * surv_proj[a-1,y-1] * d;
+  //         } // close highest patch
+  //         
+  //         else{
+  //           proj_n_p_a_y_hat[p,a,y] = proj_n_p_a_y_hat[p, a-1, y-1] * surv_proj[a-1,y-1] * (1-2*d) + proj_n_p_a_y_hat[p-1, a-1, y-1] * surv_proj[a-1,y-1] * d + proj_n_p_a_y_hat[p+1, a-1, y-1] * surv_proj[a-1,y-1] * d;
+  //           
+  //         } // close if/else for all other patches
+  //         
+  //       }// close ages
+  //     } // close patches
+  //     
+  //     
+  //   } // close year 2+ loop
+  //   
+  //   for(p in 1:np){
+  //     for(y in 1:(ny_proj)){
+  //       
+  //       proj_n_p_l_y_hat[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(proj_n_p_a_y_hat[p,1:n_ages,y])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
+  //       proj_dens_p_y_hat[p,y] = sum((to_vector(proj_n_p_l_y_hat[y,p,1:n_lbins])));
+  //       
+  //     }
+  //   }
+  // }
+  
 }
 
 
