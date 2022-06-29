@@ -1,7 +1,13 @@
 functions {
-  
-  real T_dep(real sbt, real Topt, real width){
+  // Gaussian temperature dependence function
+  real T_dep(real sbt, real Topt, real width, real exp_yn){
+    if(exp_yn==1){
     return exp(-0.5 * ((sbt - Topt)/width)^2); // gaussian temperature-dependent function
+  } else{
+        return (-0.1 * ((sbt - Topt)/width)^2); // gaussian temperature-dependent function, not exponentiated, for temperature-dependent process that are exponentiated later (like movement)
+        // I'm taking this out because I can't get it to be non-negative without the exp! 
+
+  }
   }
   
   matrix age_at_length_key(real loo, real l0, real k, real cv, int n_lbins, int n_ages){
@@ -107,6 +113,8 @@ data {
   
   int<lower = 0, upper = 1> run_forecast;
   
+    int<lower = 0, upper = 1> exp_yn;
+  
   int n_p_l_y[np, n_lbins, ny_train]; // SUM number of individuals in each length bin, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
   
 }
@@ -118,6 +126,8 @@ transformed data{
   matrix[np, np] adj_m; // adjacency matrix for patches 
   
   matrix[np, np] outer; // outer difference matrix 
+  
+  //int exp_yn; 
   
   // in R this is just outer(np, np, "-") 
   for(i in 1:np){
@@ -141,6 +151,8 @@ transformed data{
       maturity_at_age[a]=1;
     }
   }
+  
+   // exp_yn=1;
   
   // matrix[n_lbins, n_ages] prob_age_at_length;
   
@@ -233,7 +245,8 @@ transformed parameters{
   
   matrix[np, np] mov_inst_m[ny_train]; // array containing instantaneous movement matrices (dispersal + temperature-dependent taxis)
   
-  matrix[np, np] mov_m[ny_train]; // array containing annualized movement matrices (dispersal + temperature-dependent taxis)
+  matrix[np, np] mov_m[ny_train]; // Dan thinks this is the wrong syntax -- need to fix 
+  // array[ny_train] matrix[np, np] mov_m; // array containing annualized movement matrices (dispersal + temperature-dependent taxis)
   
   matrix[np, np] T_adjust_m[ny_train]; // array containing temperature preference matrices
   
@@ -245,9 +258,13 @@ transformed parameters{
   
   matrix[np, ny_train] ssb;
   
-  vector[n_ages] stupid_vector;
+  vector[n_ages] v_ssb; // placeholder vector for adding up ssb 
   
   real<lower=0> r0;
+  
+  vector[np] v_in; // vector for matrix multiplication 
+  
+  vector[np] v_out; // vector for matrix multiplication 
   
   r0 = exp(log_r0);
   
@@ -255,7 +272,7 @@ transformed parameters{
   
   for(a in 1:n_ages){
     unfished[a] = 999;
-    stupid_vector[a] = 999;
+    v_ssb[a] = 999;
   }
   for(p in 1:np){
     for(y in 1:ny_train){
@@ -295,7 +312,11 @@ transformed parameters{
   // calculate temperature-dependence correction factor for each patch and year depending on sbt
   for(p in 1:np){
     for(y in 1:ny_train){
-      T_adjust[p,y] = T_dep(sbt[p,y], Topt, width);  
+      T_adjust[p,y] = T_dep(sbt[p,y], Topt, width, exp_yn);  
+   //   print("T_adjust in patch ",p," and year ",y," is ",T_adjust[p,y]);
+      print("Topt is ",Topt);
+      print("width is ",width);
+      
     } // close years
   } // close patches
   
@@ -334,12 +355,20 @@ transformed parameters{
       }
       tax_m[y] = adj_m .* T_adjust_m[y]; 
       tax_m[y] = add_diag(tax_m[y], -1 * colSums(tax_m[y])); // fill in the diagonal with within-patch "taxis" so everything sums to 1 
+      tax_m[y] = matrix_exp(tax_m[y]); // DAN -- is this the correct adjustment based on Jim/Devin emails? 
       mov_inst_m[y] = diff_m + tax_m[y]; // movement as a sum of diffusion and taxis (can cancel each other out)
       mov_m[y] = matrix_exp(mov_inst_m[y]); // matrix exponentiate, although see https://discourse.mc-stan.org/t/matrix-exponential-function/9595
       // print("column sums of the annualized movement matrix in year ",y," is ",colSums(mov_m[y]));
       //  print("the annualized movement matrix in year ",y," is ",mov_m[y]);
     }
+  } else {
+    for(z in 1:np){
+      for(x in 1:np){
+    diff_m[z,x] = 999; 
   }
+  }
+  
+    }
   
   // fill in year 1 of n_p_a_y_hat, initialized with mean_recruits 
   for(p in 1:np){
@@ -431,7 +460,6 @@ transformed parameters{
       for(p in 1:np){
         for(a in age_at_maturity:n_ages){
           // edge cases -- edges are reflecting
-          // FLAG: does this mean we're letting things move "too young" because it's referencing a-1?
           if(p==1){
             n_p_a_y_hat[p,a,y] = n_p_a_y_hat[p, a-1, y-1] * surv[p,a-1,y-1] * (1-d) + n_p_a_y_hat[p+1, a-1, y-1] * surv[p+1,a-1,y-1] * d;
           } // close patch 1 case 
@@ -449,10 +477,28 @@ transformed parameters{
       } // close patches 
     } // close T-dep movement if 
     
+    // this code block calculates adult population size based on survival and directional movement 
     if(T_dep_movement==1){
       for(a in age_at_maturity:n_ages){
-        n_p_a_y_hat[1:np,a,y] = mov_m[y] * n_p_a_y_hat[1:np, a-1, y-1]; // redistribute each age among patches according to the movement matrix 
-        // error, I think because n_p_a_y_hat[1:np, a-1, y-1] is a 1D array of reals, not a vector?
+        
+        // some acrobatics required here, because Stan won't do matrix multiplication with an array of reals like n_p_a_y_hat
+        // instead we do the matrix multiplication with a placeholder vector and then populate n_p_a_y_hat 
+        
+        // fill in placeholder vector with reproductive ages across patches, and do mortality   
+        for(p in 1:np){
+          v_in[p] = n_p_a_y_hat[p, a-1, y-1] * surv[p,a-1,y-1]; 
+        }
+       //         print("the number of adults of age ",a, " in year ",y, " across all patches after mortality is ",v_in);
+
+        v_out = mov_m[y] * v_in; // redistribute each age among patches according to the movement matrix 
+        
+       // print("multiplying that by the movement matrix for that year gives us ",v_out);
+
+        // fill in n_p_a_y_hat
+        for(p in 1:np){
+          n_p_a_y_hat[p,a,y] = v_out[p]; 
+        }
+        
       } // close ages
     }// close T-dep movement if 
     
@@ -468,6 +514,8 @@ transformed parameters{
       
       dens_p_y_hat[p,y] = sum((to_vector(n_p_l_y_hat[y,p,1:n_lbins])));
       
+    //  print("for patch ",p," in year ",y," dens_p_y_hat is ",dens_p_y_hat[p, y]);
+      
       theta[p,y] = ((1/(1+exp(-beta_obs*dens_p_y_hat[p,y]))) - 0.5)*2;
       // subtracting 0.5 and multiplying by 2 is a hacky way to get theta[0,1]
       
@@ -477,9 +525,9 @@ transformed parameters{
     for(p in 1:np){
       for(y in 1:ny_train){
         for(a in 1:n_ages){
-          stupid_vector[a] = n_p_a_y_hat[p,a,y] * maturity_at_age[a] * wt_at_age[a];
+          v_ssb[a] = n_p_a_y_hat[p,a,y] * maturity_at_age[a] * wt_at_age[a];
         }
-        ssb[p,y] = sum(stupid_vector) ;
+        ssb[p,y] = sum(v_ssb) ;
       }
     }
   }

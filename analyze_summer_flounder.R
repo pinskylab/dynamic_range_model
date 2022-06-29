@@ -409,15 +409,56 @@ stan_data <- list(
   T_dep_recruitment = T_dep_recruitment, # think carefully before making more than one of the temperature dependencies true,
   T_dep_movement = T_dep_movement,
   spawner_recruit_relationship = spawner_recruit_relationship, 
-  run_forecast=run_forecast
+  run_forecast=run_forecast,
+  exp_yn = 1
   )
 
-warmups <- 1000
-total_iterations <- 2000
+warmups <- 10
+total_iterations <- 50
 max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
 
+####### IGNORE THIS PART IT DOESN'T REALLY WORK YET
+# # exploring T-dep movement model from Jim
+# n_g = np
+# 
+# # Domain characteristics
+# lat_g = patches
+# Temp_g = sbt
+# 
+# # Parameters
+# diffusion = 0.8^2
+# preference_g = -0.1 * (Temp_g - mean(Temp_g))^2
+# 
+# # Movement operator
+# A_gg = ifelse( round(abs(outer(lat_g,lat_g,"-")),2) == round(mean(diff(lat_g)),2), 1, 0 ) # make a matrix that is 1 when the distance between patches equals the minimum possible nonzero distance (i.e., they are adjacent) and 0 otherwise 
+# # Diffusion
+# diffusion_gg = A_gg * diffusion 
+# diag(diffusion_gg) = -1 * colSums(diffusion_gg) # fill in the diagonal with within-patch "diffusion" to balance out diffusion between adjacent patches
+# # Taxis
+# taxis_gg = array(NA, dim=np, np, ny)
+# mrate_gg = array(NA, dim=c(ny, np, np))
+# mfraction_gg = array(NA, dim=c(ny, np, np))
+# for(y in 1:ny){
+#   taxis_gg[,y] = A_gg * outer(preference_g[,y], preference_g[,y], "-") # multiply the adjacency matrix by the preference difference between adjacent patches
+# diag(taxis_gg[y]) = -1 * colSums(taxis_gg[y]) # fill in the diagonal with within-patch "taxis" (don't get this either)
+# taxis_gg[y] = expm(taxis_gg[y] )# edit as per Dan/Devin/Jim convo
+# # Total
+# mrate_gg[y] = diffusion_gg + taxis_gg[y] # movement as a sum of diffusion and taxis (can cancel each other out)
+# # Annualized
+# mfraction_gg[y] = Matrix::expm(mrate_gg[y])
+# }
+# # Stationary distribution
+# stationary_g = eigen(mfraction_gg)$vectors[,1]
+# stationary_g = stationary_g / sum(stationary_g)
+# 
+# #
+# matplot( x=lat_g, y=cbind(preference_g-min(preference_g),stationary_g), type="l", col=c("black","blue") )
+
+# n(t+1) = Mrate_gg * n(t)
+
+######################### RUN THE MODEL
 stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"), # check that it's the right model!
                        data = stan_data,
                        chains = n_chains,
