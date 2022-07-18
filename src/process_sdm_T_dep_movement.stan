@@ -141,8 +141,8 @@ transformed data{
     }
   }
   
-  print("the outer matrix is ",outer); 
-  print("the adjacency matrix is ",adj_m); 
+ // print("the outer matrix is ",outer); 
+ // print("the adjacency matrix is ",adj_m); 
   
   for(a in 1:n_ages){
     if(a < age_at_maturity){
@@ -350,12 +350,15 @@ transformed parameters{
       for(i in 1:np){
         for(j in 1:np){
           // in R this is just outer(np, np, "-") 
-          T_adjust_m[y,i,j] = T_adjust[i,y] - T_adjust[j,y]; 
+          T_adjust_m[y,i,j] = exp(T_adjust[i,y] - T_adjust[j,y]+1e-3); 
+         // print("T_adjust in patch ",i," and year ",y," is ",T_adjust[i,y]); 
+         //           print("T_adjust in patch ",j," and year ",y," is ",T_adjust[i,y]); 
+
+          print("T_adjust_m in year ",y," from patch ",i," into patch ",j," is ",T_adjust_m[y,i,j]);
         }
       }
       tax_m[y] = adj_m .* T_adjust_m[y]; 
       tax_m[y] = add_diag(tax_m[y], -1 * colSums(tax_m[y])); // fill in the diagonal with within-patch "taxis" so everything sums to 1 
-      tax_m[y] = matrix_exp(tax_m[y]); // DAN -- is this the correct adjustment based on Jim/Devin emails? 
       mov_inst_m[y] = diff_m + tax_m[y]; // movement as a sum of diffusion and taxis (can cancel each other out)
       mov_m[y] = matrix_exp(mov_inst_m[y]); // matrix exponentiate, although see https://discourse.mc-stan.org/t/matrix-exponential-function/9595
       // print("column sums of the annualized movement matrix in year ",y," is ",colSums(mov_m[y]));
@@ -488,7 +491,7 @@ transformed parameters{
         for(p in 1:np){
           v_in[p] = n_p_a_y_hat[p, a-1, y-1] * surv[p,a-1,y-1]; 
         }
-       //         print("the number of adults of age ",a, " in year ",y, " across all patches after mortality is ",v_in);
+           //     print("the number of adults of age ",a, " in year ",y, " across all patches after mortality is ",v_in);
 
         v_out = mov_m[y] * v_in; // redistribute each age among patches according to the movement matrix 
         
