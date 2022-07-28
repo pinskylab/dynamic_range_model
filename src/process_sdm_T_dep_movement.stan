@@ -4,9 +4,11 @@ functions {
     if(exp_yn==1){
     return exp(-0.5 * ((sbt - Topt)/width)^2); // gaussian temperature-dependent function
   } else{
-        return (-0.1 * ((sbt - Topt)/width)^2); // gaussian temperature-dependent function, not exponentiated, for temperature-dependent process that are exponentiated later (like movement)
+        // return (-0.1 * ((sbt - Topt)/width)^2); // gaussian temperature-dependent function, not exponentiated, for temperature-dependent process that are exponentiated later (like movement)
         // I'm taking this out because I can't get it to be non-negative without the exp! 
-
+        
+        // return normal_lpdf(sbt | Topt, width);
+        return ((1 / sqrt(2 * pi() * width)) * exp(-pow(sbt - Topt,2) / (2 * pow(width,2))));
   }
   }
   
@@ -46,6 +48,19 @@ functions {
     }
     return(sums);
   }
+  
+    vector rowSums(matrix M){
+    int nrow; 
+    vector[rows(M)] sums; 
+    
+    nrow = rows(M); 
+    
+    for(i in 1:nrow){
+      sums[i] = sum(M[i,]); //sums[i] = sum(col(M,i)); 
+    }
+    return(sums);
+  }
+  
   
 } // close functions block
 
@@ -191,7 +206,7 @@ parameters{
   
   real<lower = 1e-3> sigma_obs;
   
-  real<lower=1e-3> width; // sensitivity to temperature variation
+  real<lower=1> width; // sensitivity to temperature variation
   
   real Topt; //  temp at which recruitment is maximized
   
@@ -313,10 +328,6 @@ transformed parameters{
   for(p in 1:np){
     for(y in 1:ny_train){
       T_adjust[p,y] = T_dep(sbt[p,y], Topt, width, exp_yn);  
-   //   print("T_adjust in patch ",p," and year ",y," is ",T_adjust[p,y]);
-      // print("Topt is ",Topt);
-      // print("width is ",width);
-      
     } // close years
   } // close patches
   
@@ -350,7 +361,7 @@ transformed parameters{
       for(i in 1:np){
         for(j in 1:np){
           // in R this is just outer(np, np, "-") 
-          T_adjust_m[y,i,j] = exp(T_adjust[i,y] - T_adjust[j,y]+1e-3); 
+          T_adjust_m[y,i,j] = (T_adjust[i,y] - T_adjust[j,y]); 
          // print("T_adjust in patch ",i," and year ",y," is ",T_adjust[i,y]); 
          //           print("T_adjust in patch ",j," and year ",y," is ",T_adjust[i,y]); 
 
@@ -358,9 +369,22 @@ transformed parameters{
         }
       }
       tax_m[y] = adj_m .* T_adjust_m[y]; 
+      
       tax_m[y] = add_diag(tax_m[y], -1 * colSums(tax_m[y])); // fill in the diagonal with within-patch "taxis" so everything sums to 1 
-      mov_inst_m[y] = diff_m + tax_m[y]; // movement as a sum of diffusion and taxis (can cancel each other out)
+
+      
+      mov_inst_m[y] =  diff_m + tax_m[y]; // movement as a sum of diffusion and taxis (can cancel each other out)
       mov_m[y] = matrix_exp(mov_inst_m[y]); // matrix exponentiate, although see https://discourse.mc-stan.org/t/matrix-exponential-function/9595
+      
+      if ((sum(colSums(mov_m[y])) / np - 1) > .001 ){
+        print("Something has gone very wrong, movement matrix columns do not sum to 1")
+        print("width is", width)
+        print("Topt is", Topt)
+        print(diagonal(mov_inst_m[y]))
+        
+      }
+        // print(colSums(mov_m[y]))
+
       // print("column sums of the annualized movement matrix in year ",y," is ",colSums(mov_m[y]));
       //  print("the annualized movement matrix in year ",y," is ",mov_m[y]);
     }
@@ -631,7 +655,7 @@ model {
           
         } // close eval_length_comps
         
-        log(abund_p_y[p,y]) ~ normal(log( dens_p_y_hat[p,y] + 1e-6), sigma_obs); 
+        log(abund_p_y[p,y]) ~ normal(log(dens_p_y_hat[p,y] + 1e-6), sigma_obs); 
         
         1 ~ bernoulli(theta[p,y]);
 

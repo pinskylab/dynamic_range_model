@@ -61,7 +61,7 @@ stan_data <- list(
   T_dep_movement = T_dep_movement,
   spawner_recruit_relationship = spawner_recruit_relationship, 
   run_forecast=run_forecast,
-  exp_yn = 0
+  exp_yn = 1
 )
 
 ######
@@ -69,7 +69,7 @@ stan_data <- list(
 ######
 
 warmups <- 1000
-total_iterations <- 5000
+total_iterations <- 2000
 max_treedepth <-  10
 n_chains <-  4
 n_cores <- 4
@@ -123,9 +123,10 @@ stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"
                        #                     ssb0=1000000)),
                        iter = total_iterations,
                        cores = n_cores,
-                       refresh = 250,
+                       refresh = 10,
                        control = list(max_treedepth = max_treedepth,
-                                      adapt_delta = 0.85)
+                                      adapt_delta = 0.85),
+                       init = lapply(1:n_cores, function(x) list(Topt = jitter(12,4)))
 )
 
 # a = rstan::extract(stan_model_fit, "theta_d")
