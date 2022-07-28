@@ -328,7 +328,7 @@ transformed parameters{
       for(y in 1:ny_train){
         
         if(T_dep_mortality==1){
-          surv[p,a,y] = exp(-(f[a,y] + m)) * T_adjust[p,y];
+          surv[p,a,y] = exp(-((f[a,y] + m) * T_adjust[p,y]));
         }
         
         if(T_dep_mortality==0){
