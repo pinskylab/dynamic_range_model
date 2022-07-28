@@ -8,7 +8,7 @@ functions {
         // I'm taking this out because I can't get it to be non-negative without the exp! 
         
         // return normal_lpdf(sbt | Topt, width);
-        return ((1 / sqrt(2 * pi() * width)) * exp(-pow(sbt - Topt,2) / (2 * pow(width,2))));
+        return log((1 / sqrt(2 * pi() * width)) * exp(-pow(sbt - Topt,2) / (2 * pow(width,2))));
   }
   }
   
@@ -206,7 +206,7 @@ parameters{
   
   real<lower = 1e-3> sigma_obs;
   
-  real<lower=1> width; // sensitivity to temperature variation
+  real<lower=0.5> width; // sensitivity to temperature variation
   
   real Topt; //  temp at which recruitment is maximized
   
@@ -361,7 +361,15 @@ transformed parameters{
       for(i in 1:np){
         for(j in 1:np){
           // in R this is just outer(np, np, "-") 
-          T_adjust_m[y,i,j] = (T_adjust[i,y] - T_adjust[j,y]); 
+          
+            if(exp_yn==1){
+                     T_adjust_m[y,i,j] = exp(log(T_adjust[i,y]) - log(T_adjust[j,y])); 
+
+            } else {
+                  
+                  T_adjust_m[y,i,j] = fmin(500,exp(T_adjust[i,y] - T_adjust[j,y])); 
+            }
+          
          // print("T_adjust in patch ",i," and year ",y," is ",T_adjust[i,y]); 
          //           print("T_adjust in patch ",j," and year ",y," is ",T_adjust[i,y]); 
 
@@ -376,8 +384,11 @@ transformed parameters{
       mov_inst_m[y] =  diff_m + tax_m[y]; // movement as a sum of diffusion and taxis (can cancel each other out)
       mov_m[y] = matrix_exp(mov_inst_m[y]); // matrix exponentiate, although see https://discourse.mc-stan.org/t/matrix-exponential-function/9595
       
+      // print(colSums(mov_m[y]))
+
       if ((sum(colSums(mov_m[y])) / np - 1) > .001 ){
         print("Something has gone very wrong, movement matrix columns do not sum to 1")
+        print(colSums(mov_m[y]))
         print("width is", width)
         print("Topt is", Topt)
         print(diagonal(mov_inst_m[y]))

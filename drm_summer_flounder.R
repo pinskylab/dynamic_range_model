@@ -61,7 +61,7 @@ stan_data <- list(
   T_dep_movement = T_dep_movement,
   spawner_recruit_relationship = spawner_recruit_relationship, 
   run_forecast=run_forecast,
-  exp_yn = 1
+  exp_yn = 0
 )
 
 ######
