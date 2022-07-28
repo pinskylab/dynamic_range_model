@@ -203,7 +203,7 @@ parameters{
   
   real<upper = 0.8> p_length_50_sel; // length at 50% selectivity
   
-  real<lower=0, upper=1> beta_obs; // controls how fast detection goes up with abundance
+  real<lower=0> beta_obs; // controls how fast detection goes up with abundance
   
   // real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
   
@@ -227,7 +227,7 @@ transformed parameters{
   
   real mean_recruits;
   
-  matrix<lower=0, upper=1> [np, ny_train] theta; // Bernoulli probability of encounter  
+  matrix[np, ny_train] theta; // Bernoulli probability of encounter  
   
   real n_p_a_y_hat [np, n_ages,ny_train]; // array of numbers at patch, stage, and year 
   
@@ -288,7 +288,7 @@ transformed parameters{
       else{
         unfished[a] = unfished[a-1] * exp(-m);
       }
-      print("unfished at age ",a," is ",unfished[a]);
+      // print("unfished at age ",a," is ",unfished[a]);
       
     }
     ssb0 = sum(unfished .* maturity_at_age .* wt_at_age);
@@ -314,8 +314,8 @@ transformed parameters{
     for(y in 1:ny_train){
       T_adjust[p,y] = T_dep(sbt[p,y], Topt, width, exp_yn);  
    //   print("T_adjust in patch ",p," and year ",y," is ",T_adjust[p,y]);
-      print("Topt is ",Topt);
-      print("width is ",width);
+      // print("Topt is ",Topt);
+      // print("width is ",width);
       
     } // close years
   } // close patches
@@ -354,7 +354,7 @@ transformed parameters{
          // print("T_adjust in patch ",i," and year ",y," is ",T_adjust[i,y]); 
          //           print("T_adjust in patch ",j," and year ",y," is ",T_adjust[i,y]); 
 
-          print("T_adjust_m in year ",y," from patch ",i," into patch ",j," is ",T_adjust_m[y,i,j]);
+          // print("T_adjust_m in year ",y," from patch ",i," into patch ",j," is ",T_adjust_m[y,i,j]);
         }
       }
       tax_m[y] = adj_m .* T_adjust_m[y]; 
@@ -519,9 +519,10 @@ transformed parameters{
       
     //  print("for patch ",p," in year ",y," dens_p_y_hat is ",dens_p_y_hat[p, y]);
       
-      theta[p,y] = ((1/(1+exp(-beta_obs*dens_p_y_hat[p,y]))) - 0.5)*2;
+      theta[p,y] = ((1/(1+exp(-beta_obs*dens_p_y_hat[p,y]))));
       // subtracting 0.5 and multiplying by 2 is a hacky way to get theta[0,1]
       
+      // print(theta[p,y])
     }
   }
   if(spawner_recruit_relationship==1){
@@ -618,8 +619,6 @@ model {
               
               // test = prod(1:10);
               
-              // print(dml_tmp);
-              
               target += dml_tmp;
               
             } else {
@@ -635,8 +634,8 @@ model {
         log(abund_p_y[p,y]) ~ normal(log( dens_p_y_hat[p,y] + 1e-6), sigma_obs); 
         
         1 ~ bernoulli(theta[p,y]);
-        
-        
+
+      
       } else { // only evaluate length comps if there are length comps to evaluate
       
       0 ~ bernoulli(theta[p,y]);
