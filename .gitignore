@@ -14,6 +14,6 @@ processed-data/fluke_catch_at_length_fall.csv
 src/*.rds
 flounderfits.Rdata
 results/*.rds
-
+**/results/**/*.rds
 # Andrew added
 raw-data/

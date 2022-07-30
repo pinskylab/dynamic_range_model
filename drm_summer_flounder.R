@@ -13,6 +13,15 @@ library(rstan)
 library(Matrix)
 library(rstanarm)
 
+run_name <- "without_lcomps"
+
+results_path <- file.path("results",run_name)
+
+
+if (!dir.exists(results_path)){
+  dir.create(results_path, recursive = TRUE)
+}
+
 rstan_options(javascript=FALSE, auto_write =TRUE)
 load(here("processed-data","stan_data_prep.Rdata"))
 
@@ -24,7 +33,7 @@ eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
 T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
 T_dep_recruitment = 0 # think carefully before making more than one of the temperature dependencies true
 T_dep_movement = 1
-spawner_recruit_relationship = 0
+spawner_recruit_relationship = 1
 run_forecast=0
 
 # note that many more model decisions are made in the data reshaping in prep_summer_flounder.R!
@@ -63,6 +72,10 @@ stan_data <- list(
   run_forecast=run_forecast,
   exp_yn = 0
 )
+nums <- 100 * exp(-.2 * (0:(n_ages - 1)))
+check <- t(l_at_a_mat) %*% matrix(nums,nrow = n_ages, ncol = 1)
+round(sum(nums)) == round(sum(check))
+plot(check)
 
 ######
 # fit model
@@ -129,6 +142,10 @@ stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"
                        init = lapply(1:n_cores, function(x) list(Topt = jitter(12,4)))
 )
 
+readr::write_rds(stan_model_fit, file = file.path(results_path,
+                                                  "stan_model_fit.rds"))
+
+
 # a = rstan::extract(stan_model_fit, "theta_d")
 # write_rds(stan_model_fit,"sigh.rds")
 # hist(a$sigma_obs)
@@ -166,13 +183,13 @@ ggsave(abundance_v_time, filename=here("results","density_v_time_no_length_comps
 
 # assess length comp fits
 
-n_p_l_y_hat <- tidybayes::gather_draws(stan_model_fit, n_p_l_y_hat[year,patch,length], n = 500)
+n_p_l_y_hat <- tidybayes::gather_draws(stan_model_fit, n_p_l_y_hat[year,patch,length], n = 200)
 
 # neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
 
 #neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
 
-p = 5
+p = 2
 
 dat_train_lengths <- dat_train_lengths %>% 
   group_by(patch, year) %>% 
@@ -186,16 +203,17 @@ dat_train_lengths %>%
 
 n_p_l_y_hat %>% 
   ungroup() %>% 
-  filter(patch == p) %>% 
+  filter(patch == p, year > 30) %>% 
   group_by(patch, year, .iteration) %>% 
   mutate(pvalue = .value / sum(.value)) %>% 
   ggplot(aes(length, pvalue)) + 
-  stat_lineribbon() + 
-  geom_point(data = dat_train_lengths %>% filter(patch == p), aes(length,p_length), color = "red", alpha = 0.2) +
+  stat_lineribbon() +
+  geom_point(data = dat_train_lengths %>% filter(patch == p, year > 30), aes(length,p_length), color = "red", alpha = 0.2) +
   facet_wrap(~year, scales = "free_y")
 
 # length frequency over time
 l_freq_time <- n_p_l_y_hat %>% 
+  filter(year > 30) %>% 
   ungroup() %>% 
   ggplot(aes(x=length, y=..density.., weight=.value)) + 
   geom_histogram(bins=50) +

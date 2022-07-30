@@ -421,10 +421,10 @@ transformed parameters{
           n_p_a_y_hat[p,a,1] = mean_recruits * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
         }
         if(T_dep_recruitment==0 && spawner_recruit_relationship==1){
-          n_p_a_y_hat[p,a,1] = r0 * 0.1; // scale it down a bit -- historical fishing was still occurring
+          n_p_a_y_hat[p,a,1] = r0 *  exp(raw[1] - pow(sigma_r,2) / 2); // scale it down a bit -- historical fishing was still occurring
         }
         if(T_dep_recruitment==1 && spawner_recruit_relationship==1){
-          n_p_a_y_hat[p,a,1] = r0 * 0.1 * T_adjust[p,1];
+          n_p_a_y_hat[p,a,1] = r0 *  exp(raw[1] - pow(sigma_r,2) / 2) * T_adjust[p,1];
         }
       } // close age==1 case
       else{
@@ -438,7 +438,6 @@ transformed parameters{
   // calculate recruitment deviates every year (not patch-specific)
   for (y in 2:ny_train){
     
-    if(spawner_recruit_relationship==0){
       if (y == 2){ 
         rec_dev[y-1]  =  raw[y]; // initialize first year of rec_dev with raw (process error) -- now not patch-specific
         // need to fix this awkward burn in
@@ -448,7 +447,6 @@ transformed parameters{
         rec_dev[y-1] =  alpha * rec_dev[y-2] + raw[y]; // why does rec_dev[y-1] use raw[y]? 
         
       } // close ifelse
-    }
     
     // describe population dynamics
     for(p in 1:np){
@@ -464,9 +462,12 @@ transformed parameters{
       
       if(T_dep_recruitment==0 && spawner_recruit_relationship==1){
         n_p_a_y_hat[p,1,y] = (0.8 * r0 * h * ssb[p, y-1]) / (0.2 * ssb0 * (1-h) + ssb0 * (h - 0.2));
+        n_p_a_y_hat[p,1,y]  = n_p_a_y_hat[p,1,y] * exp(rec_dev[y-1] - pow(sigma_r,2)/2);
       }
       if(T_dep_recruitment==1 && spawner_recruit_relationship==1){
         n_p_a_y_hat[p,1,y] = ((0.8 * r0 * h * ssb[p, y-1]) / (0.2 * ssb0 * (1-h) + ssb0 * (h - 0.2))) * T_adjust[p,y-1];
+        
+        n_p_a_y_hat[p,1,y] =  n_p_a_y_hat[p,1,y] *  exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1];
       }
       // 
       // why estimate raw and sigma_r? we want to estimate process error
@@ -555,8 +556,7 @@ transformed parameters{
     //  print("for patch ",p," in year ",y," dens_p_y_hat is ",dens_p_y_hat[p, y]);
       
       theta[p,y] = ((1/(1+exp(-beta_obs*dens_p_y_hat[p,y]))));
-      // subtracting 0.5 and multiplying by 2 is a hacky way to get theta[0,1]
-      
+
       // print(theta[p,y])
     }
   }
@@ -588,9 +588,6 @@ model {
   
   beta_obs ~ normal(0.05,0.1); 
   
-  // theta ~ uniform(0, 1); // Bernoulli probability of encounter
-  
-  
   // log_f ~ normal(log(m / 2),.5);
   
   if(spawner_recruit_relationship==0){
@@ -604,11 +601,9 @@ model {
     log_r0 ~ normal(15,5);
   }
   
-  Topt ~ normal(18, 4);
+  Topt ~ normal(18, 2);
   
-  width ~ normal(4, 4); 
-  
-  // log_sigma_r ~ normal(log(.5),.1); // process error prior
+  width ~ normal(4, 2); 
   
   alpha ~ normal(0,.25); // autocorrelation prior
   

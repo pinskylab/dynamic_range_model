@@ -375,6 +375,7 @@ check <- a %*% l_at_a_mat
 bin_mids=lbins+0.5 # also not sure if this is the right way to calculate the midpoints
 
 save(
+  dat_train_dens,
   np,
   n_ages,
   ny,
