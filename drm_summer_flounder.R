@@ -13,7 +13,7 @@ library(rstan)
 library(Matrix)
 library(rstanarm)
 
-run_name <- "without_lcomps"
+run_name <- "with_lcomps_no_alpha"
 
 results_path <- file.path("results",run_name)
 
@@ -29,7 +29,7 @@ load(here("processed-data","stan_data_prep.Rdata"))
 # make model decisions and prep for model 
 #############
 do_dirichlet = 1
-eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
+eval_l_comps = 1 # evaluate length composition data? 0=no, 1=yes
 T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
 T_dep_recruitment = 0 # think carefully before making more than one of the temperature dependencies true
 T_dep_movement = 1
@@ -83,9 +83,9 @@ plot(check)
 
 warmups <- 1000
 total_iterations <- 2000
-max_treedepth <-  10
-n_chains <-  4
-n_cores <- 4
+max_treedepth <-  12
+n_chains <-  1
+n_cores <- 1
 
 ####### IGNORE THIS PART IT DOESN'T REALLY WORK YET
 # # exploring T-dep movement model from Jim
@@ -139,7 +139,8 @@ stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"
                        refresh = 10,
                        control = list(max_treedepth = max_treedepth,
                                       adapt_delta = 0.85),
-                       init = lapply(1:n_cores, function(x) list(Topt = jitter(12,4)))
+                       init = lapply(1:n_cores, function(x) list(Topt = jitter(12,4),
+                                                                 log_r0 = jitter(10,5)))
 )
 
 readr::write_rds(stan_model_fit, file = file.path(results_path,
@@ -153,8 +154,8 @@ readr::write_rds(stan_model_fit, file = file.path(results_path,
 
 
 # plot important parameters 
-plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','alpha','beta_obs','theta_d'))
-plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','alpha','beta_obs','theta_d'))
+plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','beta_obs','theta_d', "beta_t"))
+plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','beta_obs','theta_d'))
 
 
 # assess abundance fits
@@ -171,9 +172,19 @@ abund_p_y <- dat_train_dens %>%
 
 abund_p_y_hat <- tidybayes::spread_draws(stan_model_fit, dens_p_y_hat[patch,year])
 
+check <- tidybayes::spread_draws(stan_model_fit, ssb[patch,year])
+
+check %>% 
+  ggplot(aes(year, ssb)) + 
+  stat_lineribbon() +
+  facet_wrap(~patch) +
+  labs(x="Year",y="ssb") + 
+  scale_fill_brewer()
+
+
 abundance_v_time <- abund_p_y_hat %>% 
   ggplot(aes(year, dens_p_y_hat)) + 
-  stat_lineribbon() + 
+  stat_lineribbon() +
   geom_point(data = abund_p_y, aes(year, abundance), color = "red") +
   facet_wrap(~patch, scales = "free_y") +
   labs(x="Year",y="Abundance") + 
