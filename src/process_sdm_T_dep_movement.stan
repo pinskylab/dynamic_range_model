@@ -201,7 +201,7 @@ parameters{
   
   real Topt; //  temp at which recruitment is maximized
   
-  // real<lower = -1, upper = 1> alpha; // autocorrelation term
+  real<lower = -1, upper = 1> alpha; // autocorrelation term
   
   real  log_mean_recruits; // log mean recruits per patch, changed to one value for all space/time
   
@@ -215,7 +215,9 @@ parameters{
   
   real<lower=0, upper=1> d; // increasing bounds on this for the temperature-dependent movement model 
   
-  real <lower = 0> theta_d;
+  vector<lower = 0, upper = 1>[np] init_dep;
+  
+  real<lower = 0> theta_d;
   
   real<lower=0, upper=1> h;
   
@@ -323,7 +325,7 @@ transformed parameters{
   // calculate temperature-dependence correction factor for each patch and year depending on sbt
   for(p in 1:np){
     for(y in 1:ny_train){
-      T_adjust[p,y] =  beta_t * T_dep(sbt[p,y], Topt, width, exp_yn);  
+      T_adjust[p,y] =   T_dep(sbt[p,y], Topt, width, exp_yn);  
     } // close years
   } // close patches
   
@@ -359,11 +361,11 @@ transformed parameters{
           // in R this is just outer(np, np, "-") 
           
             if(exp_yn==1){
-                     T_adjust_m[y,i,j] = exp(log(T_adjust[i,y]) - log(T_adjust[j,y])); 
+                     T_adjust_m[y,i,j] = exp(beta_t * (log(T_adjust[i,y]) - log(T_adjust[j,y]))); 
 
             } else {
                   
-                  T_adjust_m[y,i,j] = fmin(500,exp(T_adjust[i,y] - T_adjust[j,y])); 
+                  T_adjust_m[y,i,j] = fmin(500,exp(beta_t * (T_adjust[i,y] - T_adjust[j,y]))); 
             }
           
          // print("T_adjust in patch ",i," and year ",y," is ",T_adjust[i,y]); 
@@ -411,16 +413,16 @@ transformed parameters{
         // n_p_a_y_hat[p,a,1] = mean_recruits[p] * T_adjust[p,1] * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
         
         if(T_dep_recruitment==1 && spawner_recruit_relationship==0){
-          n_p_a_y_hat[1,p,a] = mean_recruits * T_adjust[p,1] * exp(sigma_r * raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
+          n_p_a_y_hat[1,p,a] = init_dep[p] * mean_recruits * T_adjust[p,1] * exp(sigma_r * raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
         }
         if(T_dep_recruitment==0 && spawner_recruit_relationship==0){
-          n_p_a_y_hat[1,p,a] = mean_recruits * exp(sigma_r * raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
+          n_p_a_y_hat[1,p,a] = init_dep[p] * mean_recruits * exp(sigma_r * raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
         }
         if(T_dep_recruitment==0 && spawner_recruit_relationship==1){
-          n_p_a_y_hat[1,p,a] = r0 *  exp(sigma_r * raw[1] - pow(sigma_r,2) / 2); // scale it down a bit -- historical fishing was still occurring
+          n_p_a_y_hat[1,p,a] = init_dep[p] * r0 *  exp(sigma_r * raw[1] - pow(sigma_r,2) / 2); // scale it down a bit -- historical fishing was still occurring
         }
         if(T_dep_recruitment==1 && spawner_recruit_relationship==1){
-          n_p_a_y_hat[1,p,a] = r0 *  exp(sigma_r *raw[1] - pow(sigma_r,2) / 2) * T_adjust[p,1];
+          n_p_a_y_hat[1,p,a] = init_dep[p] *r0 *  exp(sigma_r *raw[1] - pow(sigma_r,2) / 2) * T_adjust[p,1];
         }
       } // close age==1 case
       else{
@@ -445,10 +447,10 @@ transformed parameters{
         
         // rec_dev[y-1] =  alpha * rec_dev[y-2] + raw[y]; // why does rec_dev[y-1] use raw[y]? 
         
-        // rec_dev[y-1] =  alpha * rec_dev[y-2] +  sqrt(1 - pow(alpha,2)) *  raw[y]; // why does rec_dev[y-1] use raw[y]?
+        rec_dev[y-1] =  alpha * rec_dev[y-2] +  sqrt(1 - pow(alpha,2)) *  raw[y]; // why does rec_dev[y-1] use raw[y]?
 
 
-        rec_dev[y-1] =  sigma_r *raw[y]; // why does rec_dev[y-1] use raw[y]?
+        // rec_dev[y-1] =  sigma_r *raw[y]; // why does rec_dev[y-1] use raw[y]?
 
       } // close ifelse
     
@@ -590,8 +592,9 @@ model {
   
   real test;
   
-  beta_obs ~ normal(0.05,0.1); 
+  init_dep ~ beta(1.5,3);
   
+  beta_obs ~ normal(0.05,0.1); 
 
   raw ~ normal(0, 1);
 
@@ -616,7 +619,7 @@ model {
   
   beta_t ~ normal(0,2);
   
-  // alpha ~ normal(0,.25); // autocorrelation prior
+  alpha ~ normal(0,.25); // autocorrelation prior
   
   d ~ normal(0.1, 0.1); // dispersal rate as a proportion of total population size within the patch
   

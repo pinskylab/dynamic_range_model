@@ -13,7 +13,7 @@ library(rstan)
 library(Matrix)
 library(rstanarm)
 
-run_name <- "with_lcomps_no_alpha"
+run_name <- "test"
 
 results_path <- file.path("results",run_name)
 
@@ -29,7 +29,7 @@ load(here("processed-data","stan_data_prep.Rdata"))
 # make model decisions and prep for model 
 #############
 do_dirichlet = 1
-eval_l_comps = 1 # evaluate length composition data? 0=no, 1=yes
+eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
 T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
 T_dep_recruitment = 0 # think carefully before making more than one of the temperature dependencies true
 T_dep_movement = 1
@@ -155,7 +155,7 @@ readr::write_rds(stan_model_fit, file = file.path(results_path,
 
 # plot important parameters 
 plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','beta_obs','theta_d', "beta_t"))
-plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','beta_obs','theta_d'))
+plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','beta_obs','theta_d',"alpha"))
 
 
 # assess abundance fits
