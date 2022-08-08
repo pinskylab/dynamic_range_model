@@ -376,6 +376,7 @@ bin_mids=lbins+0.5 # also not sure if this is the right way to calculate the mid
 
 save(
   dat_train_dens,
+  meanpatcharea,
   np,
   n_ages,
   ny,
