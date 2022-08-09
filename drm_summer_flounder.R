@@ -13,7 +13,7 @@ library(rstan)
 library(Matrix)
 library(rstanarm)
 
-run_name <- "test"
+run_name <- "process_error"
 
 results_path <- file.path("results",run_name)
 
@@ -70,7 +70,8 @@ stan_data <- list(
   T_dep_movement = T_dep_movement,
   spawner_recruit_relationship = spawner_recruit_relationship, 
   run_forecast=run_forecast,
-  exp_yn = 0
+  exp_yn = 0,
+  process_error_toggle = 1
 )
 nums <- 100 * exp(-.2 * (0:(n_ages - 1)))
 check <- t(l_at_a_mat) %*% matrix(nums,nrow = n_ages, ncol = 1)

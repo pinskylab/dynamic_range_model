@@ -118,6 +118,8 @@ data {
   
     int<lower = 0, upper = 1> exp_yn;
   
+  int<lower = 0, upper = 1> process_error_toggle;
+  
   int n_p_l_y[np, n_lbins, ny_train]; // SUM number of individuals in each length bin, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
   
 }
@@ -194,14 +196,14 @@ parameters{
   
   real<lower = 1e-6> sigma_obs;
   
-  real<lower = 1e-6> sigma_r;
+  real<lower = 1e-6> sigma_r_raw;
 
   
   real<lower=0.5> width; // sensitivity to temperature variation
   
   real Topt; //  temp at which recruitment is maximized
   
-  real<lower = -1, upper = 1> alpha; // autocorrelation term
+  real<lower = 0, upper = 0.99> alpha; // autocorrelation term
   
   real  log_mean_recruits; // log mean recruits per patch, changed to one value for all space/time
   
@@ -282,7 +284,11 @@ transformed parameters{
   
   // real sigma_obs = sigma_total / 2;
   
+  real sigma_r;
+  
   r0 = exp(log_r0);
+  
+  sigma_r = sigma_r_raw * process_error_toggle;
   
   ssb0 = -999;
   
@@ -445,14 +451,11 @@ transformed parameters{
       } // close y==2 case  
       else {
         
-        // rec_dev[y-1] =  alpha * rec_dev[y-2] + raw[y]; // why does rec_dev[y-1] use raw[y]? 
-        
-        rec_dev[y-1] =  alpha * rec_dev[y-2] +  sqrt(1 - pow(alpha,2)) *  raw[y]; // why does rec_dev[y-1] use raw[y]?
-
-
-        // rec_dev[y-1] =  sigma_r *raw[y]; // why does rec_dev[y-1] use raw[y]?
+        rec_dev[y-1] =  alpha * rec_dev[y-2] +  sqrt(1 - pow(alpha,2)) *  sigma_r * raw[y]; // why does rec_dev[y-1] use raw[y]?
 
       } // close ifelse
+      
+      // print(rec_dev[y-1]);
     
     // describe population dynamics
     for(p in 1:np){
@@ -598,28 +601,23 @@ model {
 
   raw ~ normal(0, 1);
 
-  sigma_r ~ normal(.2,.25);
+  sigma_r_raw ~ normal(.2,.1);
 
   sigma_obs ~ normal(0.1,.2);
 
-  // sigma_total ~ normal(.5,1);
+  log_mean_recruits ~ normal(7,5);
   
-  if(spawner_recruit_relationship==0){
-    log_mean_recruits ~ normal(7,5);
-  }
+  h ~ normal(0.6, 0.25);
   
-  if(spawner_recruit_relationship==1){
-    h ~ normal(0.6, 0.25);
-    log_r0 ~ normal(15,5);
-  }
-  
+  log_r0 ~ normal(15,5);
+
   Topt ~ normal(18, 2);
   
   width ~ normal(4, 2); 
   
   beta_t ~ normal(0,2);
   
-  alpha ~ normal(0,.25); // autocorrelation prior
+  alpha ~  beta(12,20); // concentrated around 0.4
   
   d ~ normal(0.1, 0.1); // dispersal rate as a proportion of total population size within the patch
   
