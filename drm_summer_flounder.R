@@ -13,7 +13,7 @@ library(rstan)
 library(Matrix)
 library(rstanarm)
 
-run_name <- "no_process_error"
+run_name <- "process_error"
 
 results_path <- file.path("results",run_name)
 
@@ -35,7 +35,7 @@ T_dep_recruitment = 0 # think carefully before making more than one of the tempe
 T_dep_movement = 1
 spawner_recruit_relationship = 1
 run_forecast=0
-process_error_toggle = 0
+process_error_toggle = 1
 exp_yn = 0
 
 # note that many more model decisions are made in the data reshaping in prep_summer_flounder.R!
@@ -177,13 +177,12 @@ abund_p_y <- dat_train_dens %>%
 
 abund_p_y_hat <- tidybayes::spread_draws(stan_model_fit, dens_p_y_hat[patch,year])
 
-check <- tidybayes::spread_draws(stan_model_fit, theta[patch,year])
+check <- tidybayes::spread_draws(stan_model_fit, rec_dev[year])
 
 check %>% 
-  ggplot(aes(year, theta)) + 
-  stat_lineribbon() +
-  facet_wrap(~patch) +
-  labs(x="Year",y="ssb") + 
+  ggplot(aes(year, rec_dev, color = .draw, group = .draw)) + 
+geom_line() +
+  # facet_wrap(~patch) +
   scale_fill_brewer()
 
 

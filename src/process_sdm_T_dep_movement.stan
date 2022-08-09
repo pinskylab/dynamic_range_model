@@ -476,11 +476,13 @@ transformed parameters{
       if(T_dep_recruitment==0 && spawner_recruit_relationship==1){
         n_p_a_y_hat[y,p,1] = (0.8 * r0 * h * ssb[p, y-1]) / (0.2 * ssb0 * (1-h) + ssb[p, y-1] * (h - 0.2));
         
+        n_p_a_y_hat[y,p,1] =  n_p_a_y_hat[y,p,1] *  exp(rec_dev[y-1] - pow(sigma_r,2)/2);
+        
       }
       if(T_dep_recruitment==1 && spawner_recruit_relationship==1){
         n_p_a_y_hat[y,p,1] = ((0.8 * r0 * h * ssb[p, y-1]) / (0.2 * ssb0 * (1-h) +  ssb[p, y-1] * (h - 0.2))) * T_adjust[p,y-1];
         
-        n_p_a_y_hat[y,p,1] =  n_p_a_y_hat[y,p,1] *  exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1];
+        n_p_a_y_hat[y,p,1] =  n_p_a_y_hat[y,p,1] *  exp(rec_dev[y-1] - pow(sigma_r,2)/2);
       }
       // 
       // why estimate raw and sigma_r? we want to estimate process error
@@ -515,7 +517,7 @@ transformed parameters{
           } // close patch 1 case 
           
           else if(p==np){
-            n_p_a_y_hat[y,p,a] = n_p_a_y_hat[y-1,p, a-1] * surv[y-1,p,a-1] * (1-d) + n_p_a_y_hat[y-1,p-1, a-1] * surv[p-1,a-1,y-1] * d;
+            n_p_a_y_hat[y,p,a] = n_p_a_y_hat[y-1,p, a-1] * surv[p,a-1,y-1] * (1-d) + n_p_a_y_hat[y-1,p-1, a-1] * surv[p-1,a-1,y-1] * d;
           } // close highest patch
           
           else{
@@ -668,7 +670,7 @@ model {
               
               // test = prod(1:10);
               
-              target += dml_tmp;
+              target += (dml_tmp);
               
             } else {
               

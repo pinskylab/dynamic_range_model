@@ -102,6 +102,16 @@ reg_data <- density %>%
 abund_p_y <- dat_train_dens %>%
   mutate(abundance = mean_dens * meanpatcharea) 
 
+
+fwtf <- f %>% 
+  as_tibble() %>% 
+  mutate(age = 1:nrow(.)) %>% 
+  pivot_longer(-age, names_to = "year", names_prefix = "V", names_transform = list(year = as.integer))
+
+fwtf %>% 
+  ggplot(aes(year, value, color = age, group = age)) + 
+  geom_line()
+
 # fit GAM -----------------------------------------------------------------
 
 
