@@ -470,7 +470,7 @@ transformed parameters{
       }
       
       if(T_dep_recruitment==0 && spawner_recruit_relationship==1){
-        n_p_a_y_hat[y,p,1] = (0.8 * r0 * h * ssb[p, y-1]) / (0.2 * ssb0 * (1-h) + ssb[p, y-1] * (h - 0.2))
+        n_p_a_y_hat[y,p,1] = (0.8 * r0 * h * ssb[p, y-1]) / (0.2 * ssb0 * (1-h) + ssb[p, y-1] * (h - 0.2));
         
       }
       if(T_dep_recruitment==1 && spawner_recruit_relationship==1){
