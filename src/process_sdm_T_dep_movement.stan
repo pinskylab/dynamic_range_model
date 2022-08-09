@@ -225,6 +225,10 @@ parameters{
   
   real beta_t; // responsiveness of movement to temperature
   
+  real beta_rec; // responsivenses of mean recruits to temperature
+  
+  real beta_obs_int; // intercept of detection probability
+  
   real log_r0;
   
 }
@@ -419,7 +423,7 @@ transformed parameters{
         // n_p_a_y_hat[p,a,1] = mean_recruits[p] * T_adjust[p,1] * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
         
         if(T_dep_recruitment==1 && spawner_recruit_relationship==0){
-          n_p_a_y_hat[1,p,a] = init_dep[p] * mean_recruits * T_adjust[p,1] * exp(sigma_r * raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
+          n_p_a_y_hat[1,p,a] = init_dep[p] * mean_recruits * beta_rec * T_adjust[p,1] * exp(sigma_r * raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
         }
         if(T_dep_recruitment==0 && spawner_recruit_relationship==0){
           n_p_a_y_hat[1,p,a] = init_dep[p] * mean_recruits * exp(sigma_r * raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
@@ -428,7 +432,7 @@ transformed parameters{
           n_p_a_y_hat[1,p,a] = init_dep[p] * r0 *  exp(sigma_r * raw[1] - pow(sigma_r,2) / 2); // scale it down a bit -- historical fishing was still occurring
         }
         if(T_dep_recruitment==1 && spawner_recruit_relationship==1){
-          n_p_a_y_hat[1,p,a] = init_dep[p] *r0 *  exp(sigma_r *raw[1] - pow(sigma_r,2) / 2) * T_adjust[p,1];
+          n_p_a_y_hat[1,p,a] = init_dep[p] *r0 *  exp(sigma_r *raw[1] - pow(sigma_r,2) / 2) * T_adjust[p,1] * beta_rec;
         }
       } // close age==1 case
       else{
@@ -463,7 +467,7 @@ transformed parameters{
       // density-independent, temperature-dependent recruitment of age 1
       
       if(T_dep_recruitment==1 && spawner_recruit_relationship==0){
-        n_p_a_y_hat[y,p,1] = mean_recruits * exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1];
+        n_p_a_y_hat[y,p,1] = mean_recruits * exp(rec_dev[y-1] - pow(sigma_r,2)/2) * T_adjust[p,y-1] * beta_rec;
       }
       if(T_dep_recruitment==0 && spawner_recruit_relationship==0){
         n_p_a_y_hat[y,p,1] = mean_recruits * exp(rec_dev[y-1] - pow(sigma_r,2)/2) ;
@@ -574,7 +578,7 @@ transformed parameters{
       
     //  print("for patch ",p," in year ",y," dens_p_y_hat is ",dens_p_y_hat[p, y]);
       
-      theta[p,y] = ((1/(1+exp(-beta_obs*dens_p_y_hat[p,y]))));
+      theta[p,y] = ((1/(1+exp(-(beta_obs_int + beta_obs*log(dens_p_y_hat[p,y] + 1e-6))))));
 
       // print(theta[p,y])
     }
@@ -597,7 +601,9 @@ model {
   
   init_dep ~ beta(1.5,3);
   
-  beta_obs ~ normal(0.05,0.1); 
+  beta_obs ~ normal(0.001,0.1); 
+  
+  beta_obs_int ~ normal(-100,4);
 
   raw ~ normal(0, 1);
 
@@ -616,6 +622,8 @@ model {
   width ~ normal(4, 2); 
   
   beta_t ~ normal(0,2);
+  
+  beta_rec ~ normal(0,2);
   
   alpha ~  beta(12,20); // concentrated around 0.4
   
@@ -677,7 +685,7 @@ model {
         1 ~ bernoulli(theta[p,y]);
 
       
-      } else { // only evaluate length comps if there are length comps to evaluate
+      } else { // only evaluate density if there are length comps to evaluate
       
       0 ~ bernoulli(theta[p,y]);
       

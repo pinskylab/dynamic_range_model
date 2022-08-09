@@ -13,7 +13,7 @@ library(rstan)
 library(Matrix)
 library(rstanarm)
 
-run_name <- "process_error"
+run_name <- "no_process_error"
 
 results_path <- file.path("results",run_name)
 
@@ -35,6 +35,8 @@ T_dep_recruitment = 0 # think carefully before making more than one of the tempe
 T_dep_movement = 1
 spawner_recruit_relationship = 1
 run_forecast=0
+process_error_toggle = 0
+exp_yn = 0
 
 # note that many more model decisions are made in the data reshaping in prep_summer_flounder.R!
 
@@ -70,8 +72,8 @@ stan_data <- list(
   T_dep_movement = T_dep_movement,
   spawner_recruit_relationship = spawner_recruit_relationship, 
   run_forecast=run_forecast,
-  exp_yn = 0,
-  process_error_toggle = 1
+  exp_yn = exp_yn,
+  process_error_toggle = process_error_toggle
 )
 nums <- 100 * exp(-.2 * (0:(n_ages - 1)))
 check <- t(l_at_a_mat) %*% matrix(nums,nrow = n_ages, ncol = 1)
@@ -84,7 +86,7 @@ plot(check)
 
 warmups <- 1000
 total_iterations <- 2000
-max_treedepth <-  12
+max_treedepth <-  10
 n_chains <-  1
 n_cores <- 1
 
@@ -141,7 +143,9 @@ stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"
                        control = list(max_treedepth = max_treedepth,
                                       adapt_delta = 0.85),
                        init = lapply(1:n_cores, function(x) list(Topt = jitter(12,4),
-                                                                 log_r0 = jitter(10,5)))
+                                                                 log_r0 = jitter(10,5),
+                                                                 beta_obs = jitter(1e-6,4),
+                                                                 beta_obs_int = jitter(-10,2)))
 )
 
 readr::write_rds(stan_model_fit, file = file.path(results_path,
@@ -173,10 +177,10 @@ abund_p_y <- dat_train_dens %>%
 
 abund_p_y_hat <- tidybayes::spread_draws(stan_model_fit, dens_p_y_hat[patch,year])
 
-check <- tidybayes::spread_draws(stan_model_fit, ssb[patch,year])
+check <- tidybayes::spread_draws(stan_model_fit, theta[patch,year])
 
 check %>% 
-  ggplot(aes(year, ssb)) + 
+  ggplot(aes(year, theta)) + 
   stat_lineribbon() +
   facet_wrap(~patch) +
   labs(x="Year",y="ssb") + 
