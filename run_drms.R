@@ -34,6 +34,6 @@ ctrl_file <-  ctrl_file %>%
       exp_yn = exp_yn
     ),
     fit_drm,
-    warmup = 2,
-    iter = 4
+    warmup = 1000,
+    iter = 2000
   ))
