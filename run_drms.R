@@ -22,12 +22,11 @@ ctrl_file <- read_csv("control_file.csv")
 #   nest()
 
 ctrl_file <-  ctrl_file %>%
-  slice(1) %>% 
   mutate(fits = pmap(
     list(
       run_name = id,
       do_dirichlet = do_dirichlet,
-      eval_l_comps = 1,
+      eval_l_comps = eval_l_comps,
       T_dep_movement = T_dep_movement,
       spawner_recruit_relationship = spawner_recruit_relationship,
       process_error_toggle = process_error_toggle,
@@ -35,5 +34,7 @@ ctrl_file <-  ctrl_file %>%
     ),
     fit_drm,
     warmup = 1000,
-    iter = 2000
+    iter = 2000,
+    chains = 2,
+    cores = 2
   ))

@@ -11,9 +11,9 @@ fit_drm <- function(run_name = "test",
                     warmup = 1000,
                     iter = 2000,
                     max_treedepth =  10,
-                    n_chains =  1,
+                    chains =  1,
                     refresh = 10,
-                    n_cores = 1) {
+                    cores = 1) {
   
   
   results_path <- file.path("results",run_name)
@@ -66,14 +66,14 @@ fit_drm <- function(run_name = "test",
   
   stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"), # check that it's the right model!
                          data = stan_data,
-                         chains = n_chains,
+                         chains = chains,
                          warmup = warmup,
                          iter = iter,
-                         cores = n_cores,
+                         cores = cores,
                          refresh = refresh,
                          control = list(max_treedepth = max_treedepth,
                                         adapt_delta = 0.85),
-                         init = lapply(1:n_cores, function(x) list(Topt = jitter(12,4),
+                         init = lapply(1:chains, function(x) list(Topt = jitter(12,4),
                                                                    log_r0 = jitter(10,5),
                                                                    beta_obs = jitter(1e-6,4),
                                                                    beta_obs_int = jitter(-10,2)))
@@ -96,7 +96,7 @@ fit_drm <- function(run_name = "test",
     labs(x="Year",y="Abundance") + 
     scale_fill_brewer()
   # abundance_v_time
-  ggsave(abundance_v_time, filename=here("results","density_v_time_no_length_comps.png"), width=7, height=4)
+  ggsave(abundance_v_time, filename=file.path(results_path,"abundance_fits.pdf"), width=7, height=4)
   
   
   return(stan_model_fit)
