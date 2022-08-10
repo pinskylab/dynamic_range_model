@@ -1,0 +1,5 @@
+﻿id,description,do_dirichlet,eval_l_comps,T_dep_movement,spawner_recruit_relationship,process_error_toggle,exp_yn
+v0.1,"no length comps, process error, spawner recruit, temperature movement",1,0,1,1,1,0
+v0.2,"no length comps, process error,  no spawner recruit, temperature movement",1,0,1,0,1,0
+v0.3,"no length comps, process error, spawner recruit, passive movement",1,0,0,0,1,0
+v0.4,"no length comps, no process error, spawner recruit, temperature movement",1,0,1,0,0,0

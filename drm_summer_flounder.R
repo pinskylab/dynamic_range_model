@@ -13,7 +13,7 @@ library(rstan)
 library(Matrix)
 library(rstanarm)
 
-run_name <- "process_error"
+run_name <- "process_error_no_mov"
 
 results_path <- file.path("results",run_name)
 
@@ -32,7 +32,7 @@ do_dirichlet = 1
 eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
 T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
 T_dep_recruitment = 0 # think carefully before making more than one of the temperature dependencies true
-T_dep_movement = 1
+T_dep_movement = 0
 spawner_recruit_relationship = 1
 run_forecast=0
 process_error_toggle = 1

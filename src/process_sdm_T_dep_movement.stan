@@ -276,8 +276,6 @@ transformed parameters{
   
   matrix[np, ny_train] ssb;
   
-  vector[n_ages] v_ssb; // placeholder vector for adding up ssb 
-  
   real r0;
   
   vector[np] v_in; // vector for matrix multiplication 
@@ -663,6 +661,8 @@ model {
               prob = (to_vector(n_p_l_y[p,1:n_lbins,y])  / sum(to_vector(n_p_l_y[p,1:n_lbins,y])));
               
               n = sum(n_p_l_y[p,1:n_lbins,y]);
+              
+              print(lgamma(n * prob + theta_d * n * prob_hat));
               
               dml_tmp = lgamma(n + 1) -  sum(lgamma(n * prob + 1)) + lgamma(theta_d * n) - lgamma(n + theta_d * n) + sum(lgamma(n * prob + theta_d * n * prob_hat) - lgamma(theta_d * n * prob_hat)); // see https://github.com/merrillrudd/LIME/blob/9dcfc7f7d5f56f280767c6900972de94dd1fea3b/src/LIME.cpp#L559 for log transformation of dirichlet-multinomial in Thorston et al. 2017
               
