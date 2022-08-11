@@ -2,5 +2,5 @@
 v0.1,"no length comps, process error, spawner recruit, temperature movement",1,0,1,1,1,0
 v0.2,"no length comps, process error,  no spawner recruit, temperature movement",1,0,1,0,1,0
 v0.3,"no length comps, process error, spawner recruit, passive movement",1,0,0,1,1,0
-v0.4,"no length comps, no process error, spawner recruit, temperature movement",1,0,1,0,0,0
+v0.4,"no length comps, no process error, spawner recruit, temperature movement",1,0,1,1,0,0
 v0.5,"no process error, no movement",1,0,0,1,0,0
