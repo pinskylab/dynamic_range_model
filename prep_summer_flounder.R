@@ -46,7 +46,7 @@ if(time_varying_f==FALSE){
 }
 
 if(trim_to_abundant_patches==TRUE){
-  focal_patch_n = 7 # adjust accordingly
+  focal_patch_n = 2 # adjust accordingly
 }
 
 if(time_varying_f==TRUE){
@@ -108,7 +108,7 @@ if(trim_to_abundant_patches==TRUE){
     group_by(lat_floor) %>% 
     summarise(total = sum(number_at_length)) %>% 
     arrange(-total) %>% 
-    slice(1:7) # CHECK THIS MANUALLY TO BE SURE IT'S SANE, AND PATCHES ARE CONTIGUOUS
+    slice(1:focal_patch_n) # CHECK THIS MANUALLY TO BE SURE IT'S SANE, AND PATCHES ARE CONTIGUOUS
   
   patches <- sort(unique(use_patches$lat_floor))
   np = length(patches) 
@@ -375,6 +375,8 @@ check <- a %*% l_at_a_mat
 bin_mids=lbins+0.5 # also not sure if this is the right way to calculate the midpoints
 
 save(
+  dat_train_dens,
+  meanpatcharea,
   np,
   n_ages,
   ny,

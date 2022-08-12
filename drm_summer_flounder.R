@@ -13,6 +13,15 @@ library(rstan)
 library(Matrix)
 library(rstanarm)
 
+run_name <- "process_error_no_mov"
+
+results_path <- file.path("results",run_name)
+
+
+if (!dir.exists(results_path)){
+  dir.create(results_path, recursive = TRUE)
+}
+
 rstan_options(javascript=FALSE, auto_write =TRUE)
 load(here("processed-data","stan_data_prep.Rdata"))
 
@@ -23,9 +32,11 @@ do_dirichlet = 1
 eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
 T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
 T_dep_recruitment = 0 # think carefully before making more than one of the temperature dependencies true
-T_dep_movement = 1
-spawner_recruit_relationship = 0
+T_dep_movement = 0
+spawner_recruit_relationship = 1
 run_forecast=0
+process_error_toggle = 1
+exp_yn = 0
 
 # note that many more model decisions are made in the data reshaping in prep_summer_flounder.R!
 
@@ -61,8 +72,13 @@ stan_data <- list(
   T_dep_movement = T_dep_movement,
   spawner_recruit_relationship = spawner_recruit_relationship, 
   run_forecast=run_forecast,
-  exp_yn = 0
+  exp_yn = exp_yn,
+  process_error_toggle = process_error_toggle
 )
+nums <- 100 * exp(-.2 * (0:(n_ages - 1)))
+check <- t(l_at_a_mat) %*% matrix(nums,nrow = n_ages, ncol = 1)
+round(sum(nums)) == round(sum(check))
+plot(check)
 
 ######
 # fit model
@@ -71,8 +87,8 @@ stan_data <- list(
 warmups <- 1000
 total_iterations <- 2000
 max_treedepth <-  10
-n_chains <-  4
-n_cores <- 4
+n_chains <-  1
+n_cores <- 1
 
 ####### IGNORE THIS PART IT DOESN'T REALLY WORK YET
 # # exploring T-dep movement model from Jim
@@ -126,8 +142,15 @@ stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"
                        refresh = 10,
                        control = list(max_treedepth = max_treedepth,
                                       adapt_delta = 0.85),
-                       init = lapply(1:n_cores, function(x) list(Topt = jitter(12,4)))
+                       init = lapply(1:n_cores, function(x) list(Topt = jitter(12,4),
+                                                                 log_r0 = jitter(10,5),
+                                                                 beta_obs = jitter(1e-6,4),
+                                                                 beta_obs_int = jitter(-10,2)))
 )
+
+readr::write_rds(stan_model_fit, file = file.path(results_path,
+                                                  "stan_model_fit.rds"))
+
 
 # a = rstan::extract(stan_model_fit, "theta_d")
 # write_rds(stan_model_fit,"sigh.rds")
@@ -136,8 +159,8 @@ stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"
 
 
 # plot important parameters 
-plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','alpha','beta_obs','theta_d'))
-plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','alpha','beta_obs','theta_d'))
+plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','beta_obs','theta_d', "beta_t"))
+plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','beta_obs','theta_d',"alpha"))
 
 
 # assess abundance fits
@@ -154,9 +177,18 @@ abund_p_y <- dat_train_dens %>%
 
 abund_p_y_hat <- tidybayes::spread_draws(stan_model_fit, dens_p_y_hat[patch,year])
 
+check <- tidybayes::spread_draws(stan_model_fit, rec_dev[year])
+
+check %>% 
+  ggplot(aes(year, rec_dev, color = .draw, group = .draw)) + 
+geom_line() +
+  # facet_wrap(~patch) +
+  scale_fill_brewer()
+
+
 abundance_v_time <- abund_p_y_hat %>% 
   ggplot(aes(year, dens_p_y_hat)) + 
-  stat_lineribbon() + 
+  stat_lineribbon() +
   geom_point(data = abund_p_y, aes(year, abundance), color = "red") +
   facet_wrap(~patch, scales = "free_y") +
   labs(x="Year",y="Abundance") + 
@@ -166,13 +198,13 @@ ggsave(abundance_v_time, filename=here("results","density_v_time_no_length_comps
 
 # assess length comp fits
 
-n_p_l_y_hat <- tidybayes::gather_draws(stan_model_fit, n_p_l_y_hat[year,patch,length], n = 500)
+n_p_l_y_hat <- tidybayes::gather_draws(stan_model_fit, n_p_l_y_hat[year,patch,length], n = 200)
 
 # neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
 
 #neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
 
-p = 5
+p = 2
 
 dat_train_lengths <- dat_train_lengths %>% 
   group_by(patch, year) %>% 
@@ -186,16 +218,17 @@ dat_train_lengths %>%
 
 n_p_l_y_hat %>% 
   ungroup() %>% 
-  filter(patch == p) %>% 
+  filter(patch == p, year > 30) %>% 
   group_by(patch, year, .iteration) %>% 
   mutate(pvalue = .value / sum(.value)) %>% 
   ggplot(aes(length, pvalue)) + 
-  stat_lineribbon() + 
-  geom_point(data = dat_train_lengths %>% filter(patch == p), aes(length,p_length), color = "red", alpha = 0.2) +
+  stat_lineribbon() +
+  geom_point(data = dat_train_lengths %>% filter(patch == p, year > 30), aes(length,p_length), color = "red", alpha = 0.2) +
   facet_wrap(~year, scales = "free_y")
 
 # length frequency over time
 l_freq_time <- n_p_l_y_hat %>% 
+  filter(year > 30) %>% 
   ungroup() %>% 
   ggplot(aes(x=length, y=..density.., weight=.value)) + 
   geom_histogram(bins=50) +
