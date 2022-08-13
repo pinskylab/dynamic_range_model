@@ -13,7 +13,7 @@ library(rstan)
 library(Matrix)
 library(rstanarm)
 
-run_name <- "process_error_no_mov"
+run_name <- "process_error_Trec"
 
 results_path <- file.path("results",run_name)
 
@@ -31,12 +31,12 @@ load(here("processed-data","stan_data_prep.Rdata"))
 do_dirichlet = 1
 eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
 T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
-T_dep_recruitment = 0 # think carefully before making more than one of the temperature dependencies true
+T_dep_recruitment = 1 # think carefully before making more than one of the temperature dependencies true
 T_dep_movement = 0
-spawner_recruit_relationship = 1
-run_forecast=0
+spawner_recruit_relationship = 0
+run_forecast=1
 process_error_toggle = 1
-exp_yn = 0
+exp_yn = 1
 
 # note that many more model decisions are made in the data reshaping in prep_summer_flounder.R!
 
@@ -87,47 +87,8 @@ plot(check)
 warmups <- 1000
 total_iterations <- 2000
 max_treedepth <-  10
-n_chains <-  1
-n_cores <- 1
-
-####### IGNORE THIS PART IT DOESN'T REALLY WORK YET
-# # exploring T-dep movement model from Jim
-# n_g = np
-# 
-# # Domain characteristics
-# lat_g = patches
-# Temp_g = sbt
-# 
-# # Parameters
-# diffusion = 0.8^2
-# preference_g = -0.1 * (Temp_g - mean(Temp_g))^2
-# 
-# # Movement operator
-# A_gg = ifelse( round(abs(outer(lat_g,lat_g,"-")),2) == round(mean(diff(lat_g)),2), 1, 0 ) # make a matrix that is 1 when the distance between patches equals the minimum possible nonzero distance (i.e., they are adjacent) and 0 otherwise 
-# # Diffusion
-# diffusion_gg = A_gg * diffusion 
-# diag(diffusion_gg) = -1 * colSums(diffusion_gg) # fill in the diagonal with within-patch "diffusion" to balance out diffusion between adjacent patches
-# # Taxis
-# taxis_gg = array(NA, dim=np, np, ny)
-# mrate_gg = array(NA, dim=c(ny, np, np))
-# mfraction_gg = array(NA, dim=c(ny, np, np))
-# for(y in 1:ny){
-#   taxis_gg[,y] = A_gg * outer(preference_g[,y], preference_g[,y], "-") # multiply the adjacency matrix by the preference difference between adjacent patches
-# diag(taxis_gg[y]) = -1 * colSums(taxis_gg[y]) # fill in the diagonal with within-patch "taxis" (don't get this either)
-# taxis_gg[y] = expm(taxis_gg[y] )# edit as per Dan/Devin/Jim convo
-# # Total
-# mrate_gg[y] = diffusion_gg + taxis_gg[y] # movement as a sum of diffusion and taxis (can cancel each other out)
-# # Annualized
-# mfraction_gg[y] = Matrix::expm(mrate_gg[y])
-# }
-# # Stationary distribution
-# stationary_g = eigen(mfraction_gg)$vectors[,1]
-# stationary_g = stationary_g / sum(stationary_g)
-# 
-# #
-# matplot( x=lat_g, y=cbind(preference_g-min(preference_g),stationary_g), type="l", col=c("black","blue") )
-
-# n(t+1) = Mrate_gg * n(t)
+n_chains <-  4
+n_cores <- 4
 
 ######################### RUN THE MODEL
 stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"), # check that it's the right model!
@@ -147,8 +108,8 @@ stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"
                                                                  beta_obs = jitter(1e-6,4),
                                                                  beta_obs_int = jitter(-10,2)))
 )
-
-readr::write_rds(stan_model_fit, file = file.path(results_path,
+write_rds(stan_data, file.path(results_path, "stan_model_data.rds"))
+readr::write_rds(stan_model_fit, file.path(results_path,
                                                   "stan_model_fit.rds"))
 
 
@@ -157,23 +118,21 @@ readr::write_rds(stan_model_fit, file = file.path(results_path,
 # hist(a$sigma_obs)
 # rstanarm::launch_shinystan(stan_model_fit)
 
+# NOTE ABOUT PLOTS: I commented out a lot of plots that weren't written out, just to be able to run the whole script at once. Feel free to uncomment any, and add a ggsave() call. -AF 8/13/22
 
 # plot important parameters 
 plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','beta_obs','theta_d', "beta_t"))
 plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','beta_obs','theta_d',"alpha"))
-
-
-# assess abundance fits
-
 hist(extract(stan_model_fit, "mean_recruits")$mean_recruits)
+
+
+# extract model elements 
+
+# assess fit to data 
+
 
 abund_p_y <- dat_train_dens %>%
   mutate(abundance = mean_dens * meanpatcharea) 
-# left_join(patchdat, by = c("lat_floor", "patch")) %>% 
-# group_by(patch, year) %>% 
-# summarise(abundance = sum(mean_dens *meanpatcharea)) %>% 
-# ungroup()
-
 
 abund_p_y_hat <- tidybayes::spread_draws(stan_model_fit, dens_p_y_hat[patch,year])
 
@@ -194,7 +153,7 @@ abundance_v_time <- abund_p_y_hat %>%
   labs(x="Year",y="Abundance") + 
   scale_fill_brewer()
 abundance_v_time
-ggsave(abundance_v_time, filename=here("results","density_v_time_no_length_comps.png"), width=7, height=4)
+  ggsave(abundance_v_time, filename=here(results_path,"density_v_time_by_patch.png"), width=7, height=4)
 
 # assess length comp fits
 
@@ -234,92 +193,82 @@ l_freq_time <- n_p_l_y_hat %>%
   geom_histogram(bins=50) +
   facet_grid(patch~year)
 
-ggsave(l_freq_time, filename=here("results","length_freq_time_flounder.png"), scale=1.5, width=15, height=4)
+ggsave(l_freq_time, filename=here(results_path,"length_freq_time_flounder.png"), scale=1.5, width=15, height=4)
 
 # is there a temperature - recruitment relationship? 
 
 ## first need to figure out which lengths correspond to age 0 
-length_at_age_key %>% 
-  ggplot(aes(x=length_bin, y=p_bin)) +
-  geom_line() + 
-  facet_wrap(~age)
+# length_at_age_key %>% 
+#   ggplot(aes(x=length_bin, y=p_bin)) +
+#   geom_line() + 
+#   facet_wrap(~age)
 
 ## let's call recruits <5cm
 
-selectivity_at_bin <- gather_draws(stan_model_fit, selectivity_at_bin[n_lbins], n=500)
-
-mean_sel <- selectivity_at_bin %>% 
-  group_by(n_lbins) %>% 
-  summarise(mean_sel = mean(.value)) %>% 
-  rename(length = n_lbins)
-
-# get proportion of recruits adjusted by selectivity
-recruits <- n_p_l_y_hat %>% 
-  left_join(mean_sel, by="length") %>% 
-  mutate(recruit = ifelse(length <=5, "yes", "no"),
-         val_post_sel = .value / mean_sel) %>% 
-  group_by(recruit, patch, year, .draw) %>% 
-  summarise(sumcount = sum(val_post_sel)) %>% 
-  ungroup() %>% 
-  group_by(patch, year, .draw) %>% 
-  mutate(prop_recruit = sumcount / sum(sumcount)) %>% 
-  filter(recruit == "yes")
-
-recruits %>% group_by(patch, year) %>% 
-  mutate(mean_prop_rec = mean(prop_recruit)) %>% 
-  left_join(dat_train_sbt, by=c('patch','year')) %>% 
-  ggplot(aes(x=sbt, y=mean_prop_rec, color=year, fill=year)) +
-  geom_point()
+# selectivity_at_bin <- gather_draws(stan_model_fit, selectivity_at_bin[n_lbins], n=500)
+# 
+# mean_sel <- selectivity_at_bin %>% 
+#   group_by(n_lbins) %>% 
+#   summarise(mean_sel = mean(.value)) %>% 
+#   rename(length = n_lbins)
+# 
+# # get proportion of recruits adjusted by selectivity
+# recruits <- n_p_l_y_hat %>% 
+#   left_join(mean_sel, by="length") %>% 
+#   mutate(recruit = ifelse(length <=5, "yes", "no"),
+#          val_post_sel = .value / mean_sel) %>% 
+#   group_by(recruit, patch, year, .draw) %>% 
+#   summarise(sumcount = sum(val_post_sel)) %>% 
+#   ungroup() %>% 
+#   group_by(patch, year, .draw) %>% 
+#   mutate(prop_recruit = sumcount / sum(sumcount)) %>% 
+#   filter(recruit == "yes")
+# 
+# recruits %>% group_by(patch, year) %>% 
+#   mutate(mean_prop_rec = mean(prop_recruit)) %>% 
+#   left_join(dat_train_sbt, by=c('patch','year')) %>% 
+#   ggplot(aes(x=sbt, y=mean_prop_rec, color=year, fill=year)) +
+#   geom_point()
 
 # plot recruitment deviates
 # note that the length of rec_dev is actually 34 not 35
-gather_draws(stan_model_fit, rec_dev[ny]) %>% 
-  ggplot(aes(x=ny, y=.value)) + 
-  stat_lineribbon() + 
-  scale_fill_brewer()
+# gather_draws(stan_model_fit, rec_dev[ny]) %>% 
+#   ggplot(aes(x=ny, y=.value)) + 
+#   stat_lineribbon() + 
+#   scale_fill_brewer()
 
 # plot raw
 raw_v_time <- gather_draws(stan_model_fit, raw[ny]) %>%
   ggplot(aes(x=ny, y=.value)) + 
   stat_lineribbon() + 
   scale_fill_brewer()
-ggsave(raw_v_time, filename=here("results","raw_v_time.png"))
+ggsave(raw_v_time, filename=here(results_path,"raw_v_time.png"))
 
 # plot actual recruitment
-n_p_a_y_hat <- gather_draws(stan_model_fit, n_p_a_y_hat[np, n_ages, ny])
-
-n_p_a_y_hat %>%
-  filter(n_ages==1) %>%
-  ggplot(aes(x=ny, y=.value)) +
-  stat_lineribbon() +
-  scale_fill_brewer() +
-  facet_wrap(~np)
-
-# plot all ages over time
-n_p_a_y_hat %>% 
-  ggplot(aes(x=ny, y=.value)) +
-  stat_lineribbon() +
-  scale_fill_brewer() +
-  facet_grid(np~n_ages)
-
-proj_n_p_a_y_hat %>% 
-  ggplot(aes(x=`(ny_proj + 1)`, y=.value)) +
-  stat_lineribbon() +
-  scale_fill_brewer() +
-  facet_grid(np~n_ages)
-
-# detection stats 
-spread_draws(stan_model_fit, theta[patch,year]) %>% 
-  ggplot(aes(x=year, y=theta)) + 
-  stat_lineribbon() + 
-  facet_wrap(~patch) +
-  scale_fill_brewer()
-
-beta_obs <- extract(stan_model_fit, "beta_obs")$beta_obs
-hist(beta_obs)
-
-# save model run if desired
-saveRDS(stan_model_fit, here("results","summer_flounder_stan_fit.rds"))
+# not totally sure which of these is correct for the new indexing, I think the second?
+# n_p_a_y_hat <- gather_draws(stan_model_fit, n_p_a_y_hat[np, n_ages, ny])
+# tmp <- gather_draws(stan_model_fit, n_p_a_y_hat[ny, np, n_ages])
+# 
+# n_p_a_y_hat %>%
+#   filter(n_ages==1) %>%
+#   ggplot(aes(x=ny, y=.value)) +
+#   stat_lineribbon() +
+#   scale_fill_brewer() +
+#   facet_wrap(~np)
+# 
+# # plot all ages over time
+# n_p_a_y_hat %>% 
+#   ggplot(aes(x=ny, y=.value)) +
+#   stat_lineribbon() +
+#   scale_fill_brewer() +
+#   facet_grid(np~n_ages)
+# 
+# # detection stats 
+# spread_draws(stan_model_fit, theta[patch,year]) %>% 
+#   ggplot(aes(x=year, y=theta)) + 
+#   stat_lineribbon() + 
+#   facet_wrap(~patch) +
+#   scale_fill_brewer()
 
 ###########
 # calculate summary statistics and evaluate range shifts
@@ -344,7 +293,7 @@ gg_centroid <- est_centroid %>%
   theme(legend.position = "none") +
   labs(x="Year", y="Patch", title="Centroid Position", fill="Credible Interval")
 gg_centroid
-ggsave(gg_centroid, filename=here("results","centroid_v_time_no_length_comps.png"))
+ggsave(gg_centroid, filename=here(results_path,"centroid_v_time.png"))
 
 # centroid didn't shift at all!
 
@@ -370,35 +319,35 @@ estimated_abundance_tile <- est_patch_abund %>%
   scale_y_continuous(breaks=seq(1, np, 1)) +
   labs(title="Estimated")
 
-ggsave(observed_abundance_tile, filename=here("results","observed_abundance_v_time_tileplot_no_length_comps.png"))
-ggsave(estimated_abundance_tile, filename=here("results","estimated_abundance_v_time_tileplot_no_length_comps.png"))
+ggsave(observed_abundance_tile, filename=here(results_path,"observed_abundance_v_time_tileplot.png"), width=6)
+ggsave(estimated_abundance_tile, filename=here(results_path,"estimated_abundance_v_time_tileplot.png"), width=6)
 
 # who's doing the colonizing?
-dat_train_lengths %>% 
-  group_by(patch, length) %>% 
-  arrange(year) %>% 
-  mutate(logratio = log(sum_num_at_length / lag(sum_num_at_length))) %>% 
-  filter(logratio < Inf, logratio > -Inf) %>% 
-  ungroup() %>% 
-  ggplot(aes(x=year, y=logratio, group=length, color=length)) +
-  geom_point() + 
-  geom_line() +
-  scale_color_viridis_c() +
-  facet_wrap(~patch)
-
-dat_train_lengths %>% 
-  ggplot(aes(x=year, y=sum_num_at_length, fill=length)) + 
-  geom_bar(stat="identity") +
-  facet_wrap(~patch) +
-  scale_fill_viridis_c() +
-  theme_bw()
-
-
-dat_train_lengths %>% 
-  ggplot(aes(x=year, y=sum_num_at_length, fill=length)) + 
-  geom_bar(position="fill", stat="identity") +
-  scale_fill_viridis_c() +
-  theme_bw()  
+# dat_train_lengths %>% 
+#   group_by(patch, length) %>% 
+#   arrange(year) %>% 
+#   mutate(logratio = log(sum_num_at_length / lag(sum_num_at_length))) %>% 
+#   filter(logratio < Inf, logratio > -Inf) %>% 
+#   ungroup() %>% 
+#   ggplot(aes(x=year, y=logratio, group=length, color=length)) +
+#   geom_point() + 
+#   geom_line() +
+#   scale_color_viridis_c() +
+#   facet_wrap(~patch)
+# 
+# dat_train_lengths %>% 
+#   ggplot(aes(x=year, y=sum_num_at_length, fill=length)) + 
+#   geom_bar(stat="identity") +
+#   facet_wrap(~patch) +
+#   scale_fill_viridis_c() +
+#   theme_bw()
+# 
+# 
+# dat_train_lengths %>% 
+#   ggplot(aes(x=year, y=sum_num_at_length, fill=length)) + 
+#   geom_bar(position="fill", stat="identity") +
+#   scale_fill_viridis_c() +
+#   theme_bw()  
 
 # plot temperature difference from optimum over space and time
 Topt <- extract(stan_model_fit, "Topt")$Topt
@@ -413,9 +362,19 @@ dat_train_sbt %>%
 ########
 # evaluate forecast
 ########
-proj_dens_p_y_hat <- gather_draws(stan_model_fit, proj_dens_p_y_hat[np, ny_proj])
+dens_p_y_hat_proj <- gather_draws(stan_model_fit, dens_p_y_hat_proj[np, ny_proj]) 
+#raw_proj <- gather_draws(stan_model_fit, raw_proj[ny_proj])
+# n_p_a_y_hat_proj <- gather_draws(stan_model_fit, n_p_a_y_hat_proj[np, ny_proj+1, n_ages])
+# 
+# # plot all ages over time
+# 
+# n_p_a_y_hat_proj %>% 
+#   ggplot(aes(x=`ny_proj + 1`, y=.value)) +
+#   stat_lineribbon() +
+#   scale_fill_brewer() +
+#   facet_grid(np~n_ages)
 
-proj_abund_p_y <- dat_test_dens %>%
+ proj_abund_p_y <- dat_test_dens %>%
   mutate(abundance = mean_dens * meanpatcharea)
 # left_join(patchdat, by = c("lat_floor", "patch")) %>% 
 # group_by(patch, year) %>% 
@@ -423,17 +382,17 @@ proj_abund_p_y <- dat_test_dens %>%
 #  ungroup()
 
 proj_observed_abundance_tile <- proj_abund_p_y %>% 
-  mutate(Year = (year + min(years_proj) - 1), Latitude = (patch + min(patches) - 1), Abundance=abundance) %>% 
+  mutate(Year = (year + min(years) - 1), Latitude = (patch + min(patches) - 1), Abundance=abundance) %>% 
   ggplot(aes(x=Year, y=Latitude, fill=Abundance)) +
   geom_tile() +
   theme_bw() +
-  scale_x_continuous(breaks=seq(min(years_proj), max(years_proj), 1)) +
+  scale_x_continuous(breaks=seq(min(years), max(years), 1)) +
   scale_y_continuous(breaks=seq(min(patches), max(patches), 1)) +
   scale_fill_continuous(labels = scales::comma) + # fine to comment this out if you don't have the package installed, it just makes the legend pretty
   labs(title="Observed")
 
 
-proj_est_patch_abund <- proj_dens_p_y_hat %>% 
+proj_est_patch_abund <- dens_p_y_hat_proj %>% 
   group_by(ny_proj, np) %>% 
   summarise(abundance = mean(.value))
 
@@ -446,10 +405,10 @@ proj_estimated_abundance_tile <- proj_est_patch_abund %>%
   scale_y_continuous(breaks=seq(min(patches), max(patches), 1)) +
   scale_fill_continuous(labels = scales::comma) + # fine to comment this out if you don't have the package installed, it just makes the legend pretty
   labs(title="Estimated")
-ggsave(proj_estimated_abundance_tile, filename=here("results","proj_estimated_abundance_v_time_tileplot.png"), scale=0.9)
-ggsave(proj_observed_abundance_tile, filename=here("results","proj_observed_abundance_v_time_tileplot.png"), scale=0.9)
+ggsave(proj_estimated_abundance_tile, filename=here(results_path,"proj_estimated_abundance_v_time_tileplot.png"), scale=0.9, width=6)
+ggsave(proj_observed_abundance_tile, filename=here(results_path,"proj_observed_abundance_v_time_tileplot.png"), scale=0.9, width=6)
 
-proj_abundance_v_time <- proj_dens_p_y_hat %>% 
+proj_abundance_v_time <- dens_p_y_hat_proj %>% 
   rename(patch=np) %>% 
   ggplot(aes(ny_proj, .value)) + 
   stat_lineribbon() + 
@@ -459,7 +418,7 @@ proj_abundance_v_time <- proj_dens_p_y_hat %>%
   scale_x_continuous(breaks=seq(0, 10, 2), limits=c(0, 10)) +
   theme(legend.position="none") +
   scale_fill_brewer()
-ggsave(proj_abundance_v_time, filename=here("results","proj_density_v_time.png"), width=7, height=4)
+ggsave(proj_abundance_v_time, filename=here(results_path,"proj_density_v_time.png"), width=7, height=4)
 
 # centroid position by year 
 dat_centroid_proj <- proj_abund_p_y %>% 
@@ -468,10 +427,11 @@ dat_centroid_proj <- proj_abund_p_y %>%
   mutate(Year = (year + min(years_proj) - 1), Latitude = (centroid_lat + min(patches) - 1))
 
 # model fit centroid -- should eventually estimate in model for proper SE -- just exploring here
-est_centroid_proj <- proj_dens_p_y_hat %>% 
-  group_by(ny_proj, .iteration) %>%  # IS THIS SUPPOSED TO BE .ITERATION? CHECK WHEN MODEL IS RUN FOR LONGER 
+est_centroid_proj <- dens_p_y_hat_proj %>% 
+  group_by(ny_proj, .draw) %>% 
   summarise(centroid_lat = weighted.mean(x=np, w=.value)) %>% 
-  ungroup()
+  ungroup()%>% 
+  mutate(Year = (ny_proj + min(years_proj) - 1), Latitude = (centroid_lat + min(patches) - 1))
 
 gg_centroid_proj_prep <- dat_centroid_proj %>% 
   ggplot(aes(Year, Latitude)) + 
@@ -482,7 +442,6 @@ gg_centroid_proj_prep <- dat_centroid_proj %>%
   labs(title="Centroid Position") 
 
 gg_centroid_proj <- est_centroid_proj %>% 
-  mutate(Year = (ny_proj + min(years_proj) - 1), Latitude = (centroid_lat + min(patches) - 1)) %>% 
   ggplot(aes(Year, Latitude)) + 
   stat_lineribbon() + 
   scale_fill_brewer() +
@@ -491,5 +450,5 @@ gg_centroid_proj <- est_centroid_proj %>%
   scale_y_continuous(breaks=seq(37.6, 39.2, 0.2)) +
   theme(legend.position = "none") +
   labs(title="Centroid Position") 
-ggsave(gg_centroid_proj_prep, filename=here("results","proj_centroid_v_time_prep.png"), scale=0.9)
-ggsave(gg_centroid_proj, filename=here("results","proj_centroid_v_time.png"), scale=0.9)
+ggsave(gg_centroid_proj_prep, filename=here(results_path,"proj_centroid_v_time_prep.png"), scale=0.9)
+ggsave(gg_centroid_proj, filename=here(results_path,"proj_centroid_v_time.png"), scale=0.9)

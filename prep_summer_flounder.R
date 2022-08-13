@@ -376,6 +376,7 @@ bin_mids=lbins+0.5 # also not sure if this is the right way to calculate the mid
 
 save(
   dat_train_dens,
+  dat_test_dens,
   meanpatcharea,
   np,
   n_ages,
@@ -401,5 +402,8 @@ sel_100=sel_100,
   age_at_maturity,
   l_at_a_mat,
   wt_at_age,
+patches, 
+years,
+years_proj,
 file=here("processed-data","stan_data_prep.Rdata")
 )
