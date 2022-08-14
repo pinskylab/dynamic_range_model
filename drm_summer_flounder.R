@@ -13,7 +13,7 @@ library(rstan)
 library(Matrix)
 library(rstanarm)
 
-run_name <- "process_error_Trec"
+run_name <- "process_error_stock_recruit_Tmov"
 
 results_path <- file.path("results",run_name)
 
@@ -31,12 +31,12 @@ load(here("processed-data","stan_data_prep.Rdata"))
 do_dirichlet = 1
 eval_l_comps = 0 # evaluate length composition data? 0=no, 1=yes
 T_dep_mortality = 0 # CURRENTLY NOT REALLY WORKING
-T_dep_recruitment = 1 # think carefully before making more than one of the temperature dependencies true
-T_dep_movement = 0
-spawner_recruit_relationship = 0
+T_dep_recruitment = 0 # think carefully before making more than one of the temperature dependencies true
+T_dep_movement = 1
+spawner_recruit_relationship = 1
 run_forecast=1
 process_error_toggle = 1
-exp_yn = 1
+exp_yn = 0
 
 # note that many more model decisions are made in the data reshaping in prep_summer_flounder.R!
 
@@ -91,7 +91,7 @@ n_chains <-  4
 n_cores <- 4
 
 ######################### RUN THE MODEL
-stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"), # check that it's the right model!
+stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!
                        data = stan_data,
                        chains = n_chains,
                        warmup = warmups,
