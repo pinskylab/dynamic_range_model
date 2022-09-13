@@ -49,6 +49,41 @@ functions {
     return(sums);
   }
   
+  // cumulative sum function
+  vector csum(vec, x){
+    return(sum(vec[1:x])); 
+  }
+  
+  // function to calculate range quantiles
+  
+  real calculate_range_quantile(patches, dens_by_patch, quantile_out{
+    vector[np] csum_dens; 
+    vector[np] quant_p; 
+    vector[np] diff_p; 
+    real quant_position; 
+    
+    for(i in 1:np){
+      csum_dens[i] = csum(dens_by_patch, i); // calculate cumulative sum of density along each patch 
+    }
+    
+    quant_p = csum_dens / sum(dens_by_patch); // turn in to proportions, i.e., quantiles 
+    
+    for(i in 1:np){
+      diff_p[i] = abs(quant_p[i] - quantile_out); // minimizes absolute distance between estimated and desired quantile 
+    }
+    
+    // DOESN'T DEAL WITH TIES! (but they seem unlikely with only 10 patches)
+    
+    // probably a more elegant way to do this... 
+    for(i in 1:np){
+      if(diff_g[i] == min(diff_g)) {
+        quant_position = patches[i];
+      }
+    }
+    return(quant_position); 
+    
+  } // close quantile function
+  
   
 } // close functions block
 
@@ -59,6 +94,8 @@ data {
   int n_ages; // number of ages
   
   int np; // number of patches
+  
+  vector[np] patches; // easier than creating it in Stan
   
   int ny_train; // years for training
   
@@ -119,6 +156,10 @@ data {
   int<lower = 0, upper = 1> exp_yn;
   
   int<lower = 0, upper = 1> process_error_toggle;
+  
+  int number_quantiles;
+  
+  real quantiles_calc[number_quantiles];
   
   int n_p_l_y[np, n_lbins, ny_train]; // SUM number of individuals in each length bin, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
   
@@ -282,11 +323,17 @@ transformed parameters{
   
   vector[np] v_out; // vector for matrix multiplication 
   
+  vector[ny_train] centroid; 
+  
+  matrix[number_quantiles, ny_train] range_quantiles; 
+  
   // real sigma_r = sigma_total / 2;
   
   // real sigma_obs = sigma_total / 2;
   
   real sigma_r;
+  
+  real
   
   r0 = exp(log_r0);
   
@@ -566,8 +613,8 @@ transformed parameters{
           
         } // close year 2+ loop
         
-        for(p in 1:np){
-          for(y in 1:ny_train){
+        for(y in 1:ny_train){
+          for(p in 1:np){
             
             n_p_l_y_hat[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(n_p_a_y_hat[y,p,1:n_ages])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
             // see https://mc-stan.org/docs/2_18/reference-manual/array-data-types-section.html
@@ -581,7 +628,14 @@ transformed parameters{
             theta[p,y] = ((1/(1+exp(-(beta_obs_int + beta_obs*log(dens_p_y_hat[p,y] + 1e-6))))));
             
             // print(theta[p,y])
+          } // close patches
+          
+          for(q in 1:number_quantiles){
+            // calculate every range quantile q for every year y 
+            range_quantiles(q, y) = calculate_range_quantile(patches, dens_p_y_hat[,y], quantiles_calc[q]);
           }
+          
+          centroid[y] = sum(to_vector(dens_p_y_hat[,y]) .* patches) / sum(to_vector(dens_p_y_hat[,y])); // calculate center of gravity
         }
         
         
@@ -716,6 +770,7 @@ generated quantities {
   matrix[np, ny_proj] ssb_proj;
   vector[np] v_in_proj; // pretty sure we could reuse v_in here but just in case
   vector[np] v_out_proj; 
+  vector[ny_proj] centroid_proj; 
   
   if(run_forecast==1){
     for(p in 1:np){
@@ -753,7 +808,7 @@ generated quantities {
       for(y in 1:ny_proj){
         for(i in 1:np){
           for(j in 1:np){
-
+            
             if(exp_yn==1){
               T_adjust_m_proj[y,i,j] = exp(beta_t * (log(T_adjust_proj[i,y]) - log(T_adjust_proj[j,y]))); 
               
@@ -787,16 +842,16 @@ generated quantities {
   } // close patches
   
   
-for (y in 2:ny_proj){
-  
-  raw_proj[y] = normal_rng(0, sigma_r); // draw a raw value 
-  
-  if(y==2){
-    rec_dev_proj[y-1] = alpha * rec_dev[ny_train-1] +  sqrt(1 - pow(alpha,2)) *  sigma_r * raw_proj[y]; // initialize with last year of rec_dev
-  }
-      else{
-              rec_dev_proj[y-1] =  alpha * rec_dev_proj[y-2] +  sqrt(1 - pow(alpha,2)) *  sigma_r * raw_proj[y]; 
-      }
+  for (y in 2:ny_proj){
+    
+    raw_proj[y] = normal_rng(0, sigma_r); // draw a raw value 
+    
+    if(y==2){
+      rec_dev_proj[y-1] = alpha * rec_dev[ny_train-1] +  sqrt(1 - pow(alpha,2)) *  sigma_r * raw_proj[y]; // initialize with last year of rec_dev
+    }
+    else{
+      rec_dev_proj[y-1] =  alpha * rec_dev_proj[y-2] +  sqrt(1 - pow(alpha,2)) *  sigma_r * raw_proj[y]; 
+    }
     
     // describe population dynamics
     for(p in 1:np){
@@ -893,9 +948,9 @@ for (y in 2:ny_proj){
     
   } // close year 2+ loop
   
-    for(y in 1:ny_proj){
-      
-  for(p in 1:np){
+  for(y in 1:ny_proj){
+    
+    for(p in 1:np){
       n_p_l_y_hat_proj[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(n_p_a_y_hat_proj[y,p,1:n_ages])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
       // see https://mc-stan.org/docs/2_18/reference-manual/array-data-types-section.html
       
@@ -903,6 +958,8 @@ for (y in 2:ny_proj){
       // not projecting theta for now 
       
     } // close patches 
+    
+    centroid_proj[y] = sum(to_vector(dens_p_y_hat_proj[,y]) .* patches) / sum(to_vector(dens_p_y_hat_proj[,y])); // calculate center of gravity
     
   } // close run forecast 
   
