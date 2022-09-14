@@ -24,6 +24,21 @@ load(here("processed-data","stan_data_prep.Rdata"))
 # LOOK FOR GUIDES TO ARGUMENTS TO R SCRIPTS FROM BASH
 
 # set up different models 
+
+test_edges = list(
+  do_dirichlet = 1,
+  eval_l_comps = 0, 
+  T_dep_mortality = 0,
+  T_dep_recruitment = 0, 
+  T_dep_movement = 0,
+  spawner_recruit_relationship = 0,
+  run_forecast=0,
+  process_error_toggle = 1,
+  exp_yn = 0,
+  number_quantiles = 3,
+  quantiles_calc = c(0.05, 0.5, 0.95)
+)
+
 process_error = list(
   do_dirichlet = 1,
   eval_l_comps = 0, 
@@ -33,7 +48,9 @@ process_error = list(
   spawner_recruit_relationship = 0,
   run_forecast=1,
   process_error_toggle = 1,
-  exp_yn = 0
+  exp_yn = 0,
+  number_quantiles = 3,
+  quantiles_calc = c(0.05, 0.5, 0.95)
 )
 
 process_error_l_comps = list(
@@ -45,7 +62,9 @@ process_error_l_comps = list(
   spawner_recruit_relationship = 0,
   run_forecast=1,
   process_error_toggle = 1,
-  exp_yn = 0
+  exp_yn = 0,
+  number_quantiles = 3,
+  quantiles_calc = c(0.05, 0.5, 0.95)
 )
 
 run_names <- c("process_error",
@@ -57,7 +76,8 @@ run_specs <- list(process_error = process_error,
 # run models in parallel 
 run_drm <- function(run_spec){
   
-  rstan_specs(javascript=FALSE, auto_write =TRUE)
+ # rstan_specs(javascript=FALSE, auto_write =TRUE)
+  # not working with updated version of Stan?
   
   run_name <- names(run_spec)
   results_path <- file.path("results",run_name)
@@ -101,6 +121,7 @@ run_drm <- function(run_spec){
     age_at_maturity = age_at_maturity,
     l_at_a_key = l_at_a_mat,
     wt_at_age = wt_at_age,
+    patches = patches, 
     do_dirichlet = do_dirichlet,
     eval_l_comps = eval_l_comps,
     T_dep_mortality = T_dep_mortality, 
@@ -109,7 +130,9 @@ run_drm <- function(run_spec){
     spawner_recruit_relationship = spawner_recruit_relationship, 
     run_forecast=run_forecast,
     exp_yn = exp_yn,
-    process_error_toggle = process_error_toggle
+    process_error_toggle = process_error_toggle,
+    number_quantiles = number_quantiles, 
+    quantiles_calc = quantiles_calc
   )
   nums <- 100 * exp(-.2 * (0:(n_ages - 1)))
   check <- t(l_at_a_mat) %*% matrix(nums,nrow = n_ages, ncol = 1)
@@ -120,11 +143,11 @@ run_drm <- function(run_spec){
   # fit model
   ######
   
-  warmups <- 100
-  total_iterations <- 200
+  warmups <- 10
+  total_iterations <- 20
   max_treedepth <-  10
-  n_chains <-  4
-  n_cores <- 4
+  n_chains <-  1
+  n_cores <- 1
   
   ######################### RUN THE MODEL
   stan_model_fit <- stan(file = here::here("src","process_sdm.stan"), # check that it's the right model!

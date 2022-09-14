@@ -49,34 +49,37 @@ functions {
     return(sums);
   }
   
+  
   // cumulative sum function
-  vector csum(vector vec, int x){
-    return(sum(vec[1:x])); 
+  // slightly different than the built-in Stan one -- this takes a 1D array of numbers and returns a single real number that sums elements 1:x of that array
+  real csum(real[] to_sum, int x){
+    return(sum(to_sum[1:x])); 
   }
   
   // function to calculate range quantiles
   
-  real calculate_range_quantile(vector patches, real dens_by_patch, real quantile_out){
-    vector[np] csum_dens; 
+  real calculate_range_quantile(int np, vector patches, real[] dens_by_patch, real quantile_out){
+    vector[np] csum_dens;
     vector[np] quant_p; 
-    vector[np] diff_p; 
+    real diff_p[np]; 
     real quant_position; 
+    real dens_p[np];
     
     for(i in 1:np){
-      csum_dens[i] = csum(dens_by_patch, i); // calculate cumulative sum of density along each patch 
+      csum_dens[i] = csum(dens_by_patch[1:np], i); // calculate cumulative sum of density along each patch 
     }
     
-    quant_p = csum_dens / sum(dens_by_patch); // turn in to proportions, i.e., quantiles 
+    quant_p = csum_dens / sum(dens_by_patch[1:np]); // turn in to proportions, i.e., quantiles 
     
     for(i in 1:np){
-      diff_p[i] = abs(quant_p[i] - quantile_out); // minimizes absolute distance between estimated and desired quantile 
+      diff_p[i] = fabs(quant_p[i] - quantile_out); // minimizes absolute distance between estimated and desired quantile 
     }
     
     // DOESN'T DEAL WITH TIES! (but they seem unlikely with only 10 patches)
     
     // probably a more elegant way to do this... 
     for(i in 1:np){
-      if(diff_g[i] == min(diff_g)) {
+      if(diff_p[i] == min(diff_p)) {
         quant_position = patches[i];
       }
     }
@@ -333,8 +336,6 @@ transformed parameters{
   
   real sigma_r;
   
-  real
-  
   r0 = exp(log_r0);
   
   sigma_r = sigma_r_raw * process_error_toggle;
@@ -447,7 +448,7 @@ transformed parameters{
               print(diagonal(mov_inst_m[y]));
               
             }
-
+            
             // print("column sums of the annualized movement matrix in year ",y," is ",colSums(mov_m[y]));
             //  print("the annualized movement matrix in year ",y," is ",mov_m[y]);
           }
@@ -629,12 +630,12 @@ transformed parameters{
             // print(theta[p,y]);
           } // close patches
           
-          for(q in 1:number_quantiles){
-            // calculate every range quantile q for every year y 
-            range_quantiles(q, y) = calculate_range_quantile(patches, dens_p_y_hat[,y], quantiles_calc[q]);
-          }
-          
-          centroid[y] = sum(to_vector(dens_p_y_hat[,y]) .* patches) / sum(to_vector(dens_p_y_hat[,y])); // calculate center of gravity
+          // for(q in 1:number_quantiles){
+            //   // calculate every range quantile q for every year y 
+            //   range_quantiles(q, y) = calculate_range_quantile(patches, dens_p_y_hat[,y], quantiles_calc[q]);
+            // }
+            
+            centroid[y] = sum(to_vector(dens_p_y_hat[,y]) .* patches) / sum(to_vector(dens_p_y_hat[,y])); // calculate center of gravity
         }
         
         
@@ -770,8 +771,8 @@ generated quantities {
   vector[np] v_in_proj; // pretty sure we could reuse v_in here but just in case
   vector[np] v_out_proj; 
   vector[ny_proj] centroid_proj; 
-    matrix[number_quantiles, ny_proj] range_quantiles_proj; 
-
+  //    matrix[number_quantiles, ny_proj] range_quantiles_proj; 
+  
   if(run_forecast==1){
     for(p in 1:np){
       for(y in 1:ny_proj){
@@ -959,14 +960,14 @@ generated quantities {
       
     } // close patches 
     
-          for(q in 1:number_quantiles){
-            // calculate every range quantile q for every year y 
-            range_quantiles_proj(q, y) = calculate_range_quantile(patches, dens_p_y_hat_proj[,y], quantiles_calc[q]);
-          }
-          
-    
-    centroid_proj[y] = sum(to_vector(dens_p_y_hat_proj[,y]) .* patches) / sum(to_vector(dens_p_y_hat_proj[,y])); // calculate center of gravity
-    
+    // for(q in 1:number_quantiles){
+      //   // calculate every range quantile q for every year y 
+      //   range_quantiles_proj(q, y) = calculate_range_quantile(patches, dens_p_y_hat_proj[,y], quantiles_calc[q]);
+      // }
+      
+      
+      centroid_proj[y] = sum(to_vector(dens_p_y_hat_proj[,y]) .* patches) / sum(to_vector(dens_p_y_hat_proj[,y])); // calculate center of gravity
+      
   } // close run forecast 
   
 } // close generated quantities block
