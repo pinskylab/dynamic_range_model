@@ -50,13 +50,13 @@ functions {
   }
   
   // cumulative sum function
-  vector csum(vec, x){
+  vector csum(vector vec, int x){
     return(sum(vec[1:x])); 
   }
   
   // function to calculate range quantiles
   
-  real calculate_range_quantile(patches, dens_by_patch, quantile_out{
+  real calculate_range_quantile(vector patches, real dens_by_patch, real quantile_out){
     vector[np] csum_dens; 
     vector[np] quant_p; 
     vector[np] diff_p; 
@@ -437,18 +437,17 @@ transformed parameters{
             mov_inst_m[y] =  diff_m + tax_m[y]; // movement as a sum of diffusion and taxis (can cancel each other out)
             mov_m[y] = matrix_exp(mov_inst_m[y]); // matrix exponentiate, although see https://discourse.mc-stan.org/t/matrix-exponential-function/9595
             
-            // print(colSums(mov_m[y]))
+            // print(colSums(mov_m[y]));
             
             if ((sum(colSums(mov_m[y])) / np - 1) > .001 ){
-              print("Something has gone very wrong, movement matrix columns do not sum to 1")
-              print(colSums(mov_m[y]))
-              print("width is", width)
-              print("Topt is", Topt)
-              print(diagonal(mov_inst_m[y]))
+              print("Something has gone very wrong, movement matrix columns do not sum to 1");
+              print(colSums(mov_m[y]));
+              print("width is", width);
+              print("Topt is", Topt);
+              print(diagonal(mov_inst_m[y]));
               
             }
-            // print(colSums(mov_m[y]))
-            
+
             // print("column sums of the annualized movement matrix in year ",y," is ",colSums(mov_m[y]));
             //  print("the annualized movement matrix in year ",y," is ",mov_m[y]);
           }
@@ -627,7 +626,7 @@ transformed parameters{
             
             theta[p,y] = ((1/(1+exp(-(beta_obs_int + beta_obs*log(dens_p_y_hat[p,y] + 1e-6))))));
             
-            // print(theta[p,y])
+            // print(theta[p,y]);
           } // close patches
           
           for(q in 1:number_quantiles){
@@ -771,7 +770,8 @@ generated quantities {
   vector[np] v_in_proj; // pretty sure we could reuse v_in here but just in case
   vector[np] v_out_proj; 
   vector[ny_proj] centroid_proj; 
-  
+    matrix[number_quantiles, ny_proj] range_quantiles_proj; 
+
   if(run_forecast==1){
     for(p in 1:np){
       for(y in 1:ny_proj){
@@ -828,11 +828,11 @@ generated quantities {
         mov_m_proj[y] = matrix_exp(mov_inst_m_proj[y]); 
         
         if ((sum(colSums(mov_m_proj[y])) / np - 1) > .001 ){
-          print("Something has gone very wrong, movement matrix columns do not sum to 1")
-          print(colSums(mov_m_proj[y]))
-          print("width is", width)
-          print("Topt is", Topt)
-          print(diagonal(mov_inst_m_proj[y]))
+          print("Something has gone very wrong, movement matrix columns do not sum to 1");
+          print(colSums(mov_m_proj[y]));
+          print("width is", width);
+          print("Topt is", Topt);
+          print(diagonal(mov_inst_m_proj[y]));
         }
       }
     } 
@@ -958,6 +958,12 @@ generated quantities {
       // not projecting theta for now 
       
     } // close patches 
+    
+          for(q in 1:number_quantiles){
+            // calculate every range quantile q for every year y 
+            range_quantiles_proj(q, y) = calculate_range_quantile(patches, dens_p_y_hat_proj[,y], quantiles_calc[q]);
+          }
+          
     
     centroid_proj[y] = sum(to_vector(dens_p_y_hat_proj[,y]) .* patches) / sum(to_vector(dens_p_y_hat_proj[,y])); // calculate center of gravity
     
