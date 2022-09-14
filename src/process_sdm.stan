@@ -438,7 +438,6 @@ transformed parameters{
             mov_inst_m[y] =  diff_m + tax_m[y]; // movement as a sum of diffusion and taxis (can cancel each other out)
             mov_m[y] = matrix_exp(mov_inst_m[y]); // matrix exponentiate, although see https://discourse.mc-stan.org/t/matrix-exponential-function/9595
             
-            // print(colSums(mov_m[y]));
             
             if ((sum(colSums(mov_m[y])) / np - 1) > .001 ){
               print("Something has gone very wrong, movement matrix columns do not sum to 1");
@@ -845,7 +844,7 @@ generated quantities {
   
   for (y in 2:ny_proj){
     
-    raw_proj[y] = normal_rng(0, sigma_r); // draw a raw value 
+    raw_proj[y] = normal_rng(0, 1); // draw a raw value 
     
     if(y==2){
       rec_dev_proj[y-1] = alpha * rec_dev[ny_train-1] +  sqrt(1 - pow(alpha,2)) *  sigma_r * raw_proj[y]; // initialize with last year of rec_dev
@@ -955,7 +954,7 @@ generated quantities {
       n_p_l_y_hat_proj[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(n_p_a_y_hat_proj[y,p,1:n_ages])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
       // see https://mc-stan.org/docs/2_18/reference-manual/array-data-types-section.html
       
-      dens_p_y_hat_proj[p,y] = normal_rng(sum((to_vector(n_p_l_y_hat_proj[y,p,1:n_lbins]))), sigma_obs);
+      // dens_p_y_hat_proj[p,y] = normal_rng(sum((to_vector(n_p_l_y_hat_proj[y,p,1:n_lbins]))), sigma_obs);
       // not projecting theta for now 
       
     } // close patches 
@@ -966,7 +965,7 @@ generated quantities {
       // }
       
       
-      centroid_proj[y] = sum(to_vector(dens_p_y_hat_proj[,y]) .* patches) / sum(to_vector(dens_p_y_hat_proj[,y])); // calculate center of gravity
+      // centroid_proj[y] = sum(to_vector(dens_p_y_hat_proj[,y]) .* patches) / sum(to_vector(dens_p_y_hat_proj[,y])); // calculate center of gravity
       
   } // close run forecast 
   
