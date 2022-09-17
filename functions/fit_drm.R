@@ -13,7 +13,10 @@ fit_drm <- function(run_name = "test",
                     max_treedepth =  10,
                     chains =  1,
                     refresh = 10,
-                    cores = 1) {
+                    cores = 1,
+                    drm_name = "process_sdm",
+                    number_quantiles = 3,
+                    quantiles_calc = c(0.05, 0.5, 0.95)) {
   
   
   results_path <- file.path("results",run_name)
@@ -60,11 +63,13 @@ fit_drm <- function(run_name = "test",
     spawner_recruit_relationship = spawner_recruit_relationship, 
     run_forecast=run_forecast,
     exp_yn = exp_yn,
-    process_error_toggle = process_error_toggle
+    process_error_toggle = process_error_toggle,
+    number_quantiles = number_quantiles,
+    quantiles_calc = quantiles_calc
   )
   nums <- 100 * exp(-.2 * (0:(n_ages - 1)))
   
-  stan_model_fit <- stan(file = here::here("src","process_sdm_T_dep_movement.stan"), # check that it's the right model!
+  stan_model_fit <- stan(file = here::here("src",paste0(drm_name,".stan")), # check that it's the right model!
                          data = stan_data,
                          chains = chains,
                          warmup = warmup,

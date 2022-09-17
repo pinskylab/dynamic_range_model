@@ -9,7 +9,9 @@ library(rstan)
 library(Matrix)
 library(rstanarm)
 
+rstan_options(javascript=FALSE, auto_write =TRUE)
 load(here("processed-data","stan_data_prep.Rdata"))
+load(here())
 
 # a = rstan::extract(stan_model_fit, "theta_d")
 # write_rds(stan_model_fit,"sigh.rds")
@@ -22,6 +24,7 @@ load(here("processed-data","stan_data_prep.Rdata"))
 plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','width','Topt','beta_obs','theta_d', "beta_t"))
 plot(stan_model_fit, pars=c('sigma_r','sigma_obs','d','beta_obs','theta_d',"alpha"))
 hist(extract(stan_model_fit, "mean_recruits")$mean_recruits)
+quantile(extract(stan_model_fit, "Topt")$Topt)
 
 
 # extract model elements 
@@ -54,44 +57,44 @@ abundance_v_time
 ggsave(abundance_v_time, filename=here(results_path,"density_v_time_by_patch.png"), width=7, height=4)
 
 # assess length comp fits
-
-n_p_l_y_hat <- tidybayes::gather_draws(stan_model_fit, n_p_l_y_hat[year,patch,length], n = 200)
-
-# neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
-
-#neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
-
-p = 2
-
-dat_train_lengths <- dat_train_lengths %>% 
-  group_by(patch, year) %>% 
-  mutate(p_length = sum_num_at_length / sum(sum_num_at_length))
-
-dat_train_lengths %>% 
-  group_by(year,patch) %>% 
-  summarise(n = sum(sum_num_at_length)) %>% 
-  ggplot(aes(year, n, color =factor(patch))) + 
-  geom_point()
-
-n_p_l_y_hat %>% 
-  ungroup() %>% 
-  filter(patch == p, year > 30) %>% 
-  group_by(patch, year, .iteration) %>% 
-  mutate(pvalue = .value / sum(.value)) %>% 
-  ggplot(aes(length, pvalue)) + 
-  stat_lineribbon() +
-  geom_point(data = dat_train_lengths %>% filter(patch == p, year > 30), aes(length,p_length), color = "red", alpha = 0.2) +
-  facet_wrap(~year, scales = "free_y")
-
-# length frequency over time
-l_freq_time <- n_p_l_y_hat %>% 
-  filter(year > 30) %>% 
-  ungroup() %>% 
-  ggplot(aes(x=length, y=..density.., weight=.value)) + 
-  geom_histogram(bins=50) +
-  facet_grid(patch~year)
-
-ggsave(l_freq_time, filename=here(results_path,"length_freq_time_flounder.png"), scale=1.5, width=15, height=4)
+# 
+# n_p_l_y_hat <- tidybayes::gather_draws(stan_model_fit, n_p_l_y_hat[year,patch,length], n = 200)
+# 
+# # neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
+# 
+# #neff <- tidybayes::gather_draws(stan_model_fit, n_eff[patch,year], n = 500)
+# 
+# p = 2
+# 
+# dat_train_lengths <- dat_train_lengths %>% 
+#   group_by(patch, year) %>% 
+#   mutate(p_length = sum_num_at_length / sum(sum_num_at_length))
+# 
+# dat_train_lengths %>% 
+#   group_by(year,patch) %>% 
+#   summarise(n = sum(sum_num_at_length)) %>% 
+#   ggplot(aes(year, n, color =factor(patch))) + 
+#   geom_point()
+# 
+# n_p_l_y_hat %>% 
+#   ungroup() %>% 
+#   filter(patch == p, year > 30) %>% 
+#   group_by(patch, year, .iteration) %>% 
+#   mutate(pvalue = .value / sum(.value)) %>% 
+#   ggplot(aes(length, pvalue)) + 
+#   stat_lineribbon() +
+#   geom_point(data = dat_train_lengths %>% filter(patch == p, year > 30), aes(length,p_length), color = "red", alpha = 0.2) +
+#   facet_wrap(~year, scales = "free_y")
+# 
+# # length frequency over time
+# l_freq_time <- n_p_l_y_hat %>% 
+#   filter(year > 30) %>% 
+#   ungroup() %>% 
+#   ggplot(aes(x=length, y=..density.., weight=.value)) + 
+#   geom_histogram(bins=50) +
+#   facet_grid(patch~year)
+# 
+# ggsave(l_freq_time, filename=here(results_path,"length_freq_time_flounder.png"), scale=1.5, width=15, height=4)
 
 # is there a temperature - recruitment relationship? 
 
