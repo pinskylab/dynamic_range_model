@@ -7,6 +7,8 @@ library(lubridate)
 here <- here::here
 
 # download from: https://zenodo.org/badge/latestdoi/29789533
+# DOI 10.5281/zenodo.3885625
+
 OApath <- "~/github/OceanAdapt-update2020/"
 
 load(paste0(OApath,"data_clean/dat_exploded.rds")) # get zero-inflated survey data
@@ -21,7 +23,7 @@ reg_of_interest <- c("Northeast US Fall")
 dat_exploded_neus <- dat_exploded %>% 
   filter(region==reg_of_interest) 
 
-explore_data <- TRUE
+explore_data <- FALSE
 if(explore_data==TRUE){
   
   # get years each stratum was sampled 
