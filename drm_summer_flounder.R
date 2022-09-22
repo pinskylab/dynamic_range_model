@@ -67,7 +67,8 @@ process_error_l_comps = list(
   quantiles_calc = c(0.05, 0.5, 0.95)
 )
 
-run_names <- c("process_error",
+run_names <- c(
+  "process_error",
                "process_error_l_comps")
 
 run_specs <- list(process_error = process_error, 
@@ -173,10 +174,6 @@ run_drm <- function(run_spec){
   
 }
 
-
-# implement function in parallel 
-cl <- parallel::makeCluster(4)
-parallel::parLapply(cl,
-                   run_specs,
-                    run_drm)
-parallel::stopCluster(cl)
+for(i in run_specs){
+  run_drm(i)
+}
