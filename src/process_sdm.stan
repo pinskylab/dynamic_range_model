@@ -629,10 +629,10 @@ transformed parameters{
             // print(theta[p,y]);
           } // close patches
           
-          // for(q in 1:number_quantiles){
-            //   // calculate every range quantile q for every year y 
-            //   range_quantiles(q, y) = calculate_range_quantile(patches, dens_p_y_hat[,y], quantiles_calc[q]);
-            // }
+          for(q in 1:number_quantiles){
+            // calculate every range quantile q for every year y
+            range_quantiles[q, y] = calculate_range_quantile(np, patches, dens_p_y_hat[,y], quantiles_calc[q]);
+          }
             
             centroid[y] = sum(to_vector(dens_p_y_hat[,y]) .* patches) / sum(to_vector(dens_p_y_hat[,y])); // calculate center of gravity
         }
@@ -756,7 +756,7 @@ generated quantities {
   // anything indexed over ny_proj+1 starts the year before the first forecast (i.e., the last year of the model fit) 
   matrix[np, n_ages] n_p_a_y_hat_proj[ny_proj+1];
   matrix[np, n_lbins] n_p_l_y_hat_proj[ny_proj+1];
-  matrix[np, ny_proj] dens_p_y_hat_proj; 
+  real dens_p_y_hat_proj[np, ny_proj]; 
   real T_adjust_proj[np, ny_proj];
   vector[ny_proj-1] rec_dev_proj;
   vector[ny_proj] raw_proj;
@@ -770,7 +770,7 @@ generated quantities {
   vector[np] v_in_proj; // pretty sure we could reuse v_in here but just in case
   vector[np] v_out_proj; 
   vector[ny_proj] centroid_proj; 
-  //    matrix[number_quantiles, ny_proj] range_quantiles_proj; 
+      matrix[number_quantiles, ny_proj] range_quantiles_proj; 
   
   if(run_forecast==1){
     for(p in 1:np){
@@ -959,13 +959,13 @@ generated quantities {
       
     } // close patches 
     
-    // for(q in 1:number_quantiles){
-      //   // calculate every range quantile q for every year y 
-      //   range_quantiles_proj(q, y) = calculate_range_quantile(patches, dens_p_y_hat_proj[,y], quantiles_calc[q]);
-      // }
+    for(q in 1:number_quantiles){
+      // calculate every range quantile q for every year y
+      range_quantiles_proj[q, y] = calculate_range_quantile(np, patches, dens_p_y_hat_proj[,y], quantiles_calc[q]);
+    }
       
-      
-      // centroid_proj[y] = sum(to_vector(dens_p_y_hat_proj[,y]) .* patches) / sum(to_vector(dens_p_y_hat_proj[,y])); // calculate center of gravity
+
+      centroid_proj[y] = sum(to_vector(dens_p_y_hat_proj[,y]) .* patches) / sum(to_vector(dens_p_y_hat_proj[,y])); // calculate center of gravity
       
   } // close run forecast 
   
