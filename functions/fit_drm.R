@@ -16,7 +16,8 @@ fit_drm <- function(run_name = "test",
                     cores = 1,
                     drm_name = "process_sdm",
                     number_quantiles = 3,
-                    quantiles_calc = c(0.05, 0.5, 0.95)) {
+                    quantiles_calc = c(0.05, 0.5, 0.95),
+                    known_f = 0) {
   
   
   results_path <- file.path("results",run_name)
@@ -29,6 +30,11 @@ fit_drm <- function(run_name = "test",
   
   load(here("processed-data","stan_data_prep.Rdata"))
   
+  if (known_f == 0){
+    
+    f_proj <- matrix(rep(f[,ncol(f)], ncol(f_proj)), ncol = ncol(f_proj), nrow = nrow(f_proj))
+    
+  }
   
   stan_data <- list(
     np=np,

@@ -753,10 +753,14 @@ model {
 
 generated quantities {
   
+  // obs denotes the actual observed data as opposed to the true state
   // anything indexed over ny_proj+1 starts the year before the first forecast (i.e., the last year of the model fit) 
-  matrix[np, n_ages] n_p_a_y_hat_proj[ny_proj+1];
-  matrix[np, n_lbins] n_p_l_y_hat_proj[ny_proj+1];
-  real dens_p_y_hat_proj[np, ny_proj]; 
+  matrix[np, n_ages] n_p_a_y_obs_proj[ny_proj+1];
+  matrix[np, n_lbins] n_p_l_y_obs_proj[ny_proj+1];
+  matrix[np, n_ages] n_p_a_y_proj[ny_proj+1];
+  matrix[np, n_lbins] n_p_l_y_proj[ny_proj+1];
+  real dens_p_y_obs_proj[np, ny_proj]; 
+  real dens_p_y_proj[np, ny_proj]; 
   real T_adjust_proj[np, ny_proj];
   vector[ny_proj-1] rec_dev_proj;
   vector[ny_proj] raw_proj;
@@ -770,8 +774,9 @@ generated quantities {
   vector[np] v_in_proj; // pretty sure we could reuse v_in here but just in case
   vector[np] v_out_proj; 
   vector[ny_proj] centroid_proj; 
-      matrix[number_quantiles, ny_proj] range_quantiles_proj; 
-  
+  matrix[number_quantiles, ny_proj] range_quantiles_proj; 
+  matrix[np, ny_proj] theta_proj; // Bernoulli probability of encounter  
+
   if(run_forecast==1){
     for(p in 1:np){
       for(y in 1:ny_proj){
@@ -780,7 +785,8 @@ generated quantities {
     } // close patches
     
     // initialize with final year(s) of our model
-    n_p_a_y_hat_proj[1,,] = n_p_a_y_hat[ny_train,,];
+    n_p_a_y_proj[1,,] = n_p_a_y_hat[ny_train,,];
+    
     raw_proj[1] = raw[ny_train];
     
     for(p in 1:np){
@@ -797,7 +803,7 @@ generated quantities {
           
         } // close years
       } // close ages
-      ssb_proj[p,1] = sum(to_vector(n_p_a_y_hat[1,p,1:n_ages]) .* maturity_at_age .* wt_at_age); // initialize ssb_proj 
+      ssb_proj[p,1] = sum(to_vector(n_p_a_y_proj[1,p,1:n_ages]) .* maturity_at_age .* wt_at_age); // initialize ssb_proj 
       
     } // close patches
     
@@ -825,6 +831,7 @@ generated quantities {
         
         
         mov_inst_m_proj[y] =  diff_m + tax_m_proj[y];
+        
         mov_m_proj[y] = matrix_exp(mov_inst_m_proj[y]); 
         
         if ((sum(colSums(mov_m_proj[y])) / np - 1) > .001 ){
@@ -859,27 +866,27 @@ generated quantities {
       // density-independent, temperature-dependent recruitment of age 1
       
       if(T_dep_recruitment==1 && spawner_recruit_relationship==0){
-        n_p_a_y_hat_proj[y,p,1] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2) * T_adjust_proj[p,y-1] * beta_rec;
+        n_p_a_y_proj[y,p,1] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2) * T_adjust_proj[p,y-1] * beta_rec;
       }
       if(T_dep_recruitment==0 && spawner_recruit_relationship==0){
-        n_p_a_y_hat_proj[y,p,1] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2) ;
+        n_p_a_y_proj[y,p,1] = mean_recruits * exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2) ;
       }
       
       if(T_dep_recruitment==0 && spawner_recruit_relationship==1){
-        n_p_a_y_hat_proj[y,p,1] = (0.8 * r0 * h * ssb_proj[p, y-1]) / (0.2 * ssb0 * (1-h) + ssb_proj[p, y-1] * (h - 0.2));
+        n_p_a_y_proj[y,p,1] = (0.8 * r0 * h * ssb_proj[p, y-1]) / (0.2 * ssb0 * (1-h) + ssb_proj[p, y-1] * (h - 0.2));
         
-        n_p_a_y_hat_proj[y,p,1] =  n_p_a_y_hat_proj[y,p,1] *  exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2);
+        n_p_a_y_proj[y,p,1] =  n_p_a_y_proj[y,p,1] *  exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2);
         
       }
       if(T_dep_recruitment==1 && spawner_recruit_relationship==1){
-        n_p_a_y_hat_proj[y,p,1] = ((0.8 * r0 * h * ssb_proj[p, y-1]) / (0.2 * ssb0 * (1-h) +  ssb_proj[p, y-1] * (h - 0.2))) * T_adjust_proj[p,y-1];
+        n_p_a_y_proj[y,p,1] = ((0.8 * r0 * h * ssb_proj[p, y-1]) / (0.2 * ssb0 * (1-h) +  ssb_proj[p, y-1] * (h - 0.2))) * T_adjust_proj[p,y-1];
         
-        n_p_a_y_hat_proj[y,p,1] =  n_p_a_y_hat_proj[y,p,1] *  exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2);
+        n_p_a_y_proj[y,p,1] =  n_p_a_y_proj[y,p,1] *  exp(rec_dev_proj[y-1] - pow(sigma_r,2)/2);
       }
       // pop dy for non-reproductive ages 
       if(age_at_maturity > 1){ // confirm that there are non-reproductive age classes above 1
       
-      n_p_a_y_hat_proj[y,p,2:(age_at_maturity-1)] = (n_p_a_y_hat_proj[y-1,p, 1:(age_at_maturity-2)]) .* to_row_vector(surv_proj[p,1:(age_at_maturity-2),y-1]);
+      n_p_a_y_proj[y,p,2:(age_at_maturity-1)] = (n_p_a_y_proj[y-1,p, 1:(age_at_maturity-2)]) .* to_row_vector(surv_proj[p,1:(age_at_maturity-2),y-1]);
       
       } // close if 
     } // close patches 
@@ -892,15 +899,15 @@ generated quantities {
         for(a in age_at_maturity:n_ages){
           // edge cases -- edges are reflecting
           if(p==1){
-            n_p_a_y_hat_proj[y,p,a] = n_p_a_y_hat_proj[y-1,p, a-1] * surv_proj[p,a-1,y-1] * (1-d) + n_p_a_y_hat_proj[y-1,p+1, a-1] * surv_proj[p+1,a-1,y-1] * d;
+            n_p_a_y_proj[y,p,a] = n_p_a_y_proj[y-1,p, a-1] * surv_proj[p,a-1,y-1] * (1-d) + n_p_a_y_proj[y-1,p+1, a-1] * surv_proj[p+1,a-1,y-1] * d;
           } // close patch 1 case 
           
           else if(p==np){
-            n_p_a_y_hat_proj[y,p,a] = n_p_a_y_hat_proj[y-1,p, a-1] * surv_proj[p,a-1,y-1] * (1-d) + n_p_a_y_hat_proj[y-1,p-1, a-1] * surv_proj[p-1,a-1,y-1] * d;
+            n_p_a_y_proj[y,p,a] = n_p_a_y_proj[y-1,p, a-1] * surv_proj[p,a-1,y-1] * (1-d) + n_p_a_y_proj[y-1,p-1, a-1] * surv_proj[p-1,a-1,y-1] * d;
           } // close highest patch
           
           else{
-            n_p_a_y_hat_proj[y,p,a] = n_p_a_y_hat_proj[y-1,p, a-1] * surv_proj[p,a-1,y-1] * (1-2*d) + n_p_a_y_hat_proj[y-1,p-1, a-1] * surv_proj[p-1,a-1,y-1] * d + n_p_a_y_hat_proj[y-1,p+1, a-1] * surv_proj[p+1,a-1,y-1] * d;
+            n_p_a_y_proj[y,p,a] = n_p_a_y_proj[y-1,p, a-1] * surv_proj[p,a-1,y-1] * (1-2*d) + n_p_a_y_proj[y-1,p-1, a-1] * surv_proj[p-1,a-1,y-1] * d + n_p_a_y_proj[y-1,p+1, a-1] * surv_proj[p+1,a-1,y-1] * d;
             
           } // close if/else for all other patches
           
@@ -914,7 +921,7 @@ generated quantities {
       
       for (p in 1:np){
         
-        n_p_a_y_hat_proj[y,p, age_at_maturity:n_ages] = n_p_a_y_hat_proj[y-1,p,  (age_at_maturity - 1):(n_ages - 1)] .* to_row_vector(surv_proj[p, (age_at_maturity - 1):(n_ages - 1),y-1]);
+        n_p_a_y_proj[y,p, age_at_maturity:n_ages] = n_p_a_y_proj[y-1,p,  (age_at_maturity - 1):(n_ages - 1)] .* to_row_vector(surv_proj[p, (age_at_maturity - 1):(n_ages - 1),y-1]);
         
       }
       
@@ -925,14 +932,14 @@ generated quantities {
         
         // fill in placeholder vector with reproductive ages across patches, and do mortality   
         for(p in 1:np){
-          v_in_proj[p] = n_p_a_y_hat_proj[y,p, a]; 
+          v_in_proj[p] = n_p_a_y_proj[y,p, a]; 
         }
         v_out_proj = mov_m_proj[y] * v_in_proj; // redistribute each age among patches according to the movement matrix 
         
         // fill in n_p_a_y_hat
         for(p in 1:np){
           
-          n_p_a_y_hat_proj[y,p,a] = v_out_proj[p]; 
+          n_p_a_y_proj[y,p,a] = v_out_proj[p]; 
           
         }
         
@@ -941,7 +948,7 @@ generated quantities {
     
     for (p in 1:np){
       
-      ssb_proj[p,y]  =  sum(to_vector(n_p_a_y_hat_proj[y,p,1:n_ages]) .* maturity_at_age .* wt_at_age);
+      ssb_proj[p,y]  =  sum(to_vector(n_p_a_y_proj[y,p,1:n_ages]) .* maturity_at_age .* wt_at_age);
       
     }
     
@@ -950,22 +957,32 @@ generated quantities {
   
   for(y in 1:ny_proj){
     
+
     for(p in 1:np){
-      n_p_l_y_hat_proj[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(n_p_a_y_hat_proj[y,p,1:n_ages])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
+      
+      n_p_l_y_proj[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(n_p_a_y_proj[y,p,1:n_ages])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
       // see https://mc-stan.org/docs/2_18/reference-manual/array-data-types-section.html
       
-      // dens_p_y_hat_proj[p,y] = normal_rng(sum((to_vector(n_p_l_y_hat_proj[y,p,1:n_lbins]))), sigma_obs);
-      // not projecting theta for now 
+      // NOTE, ignoring length sampling process at this point. In theory, need multinomial_rng or a custom dirichlet-multinomial rng here to generate simulated length comps
+      
+       n_p_l_y_obs_proj[y,p,1:n_lbins] =  n_p_l_y_proj[y,p,1:n_lbins]; // this is where length sampling process would go
+      
+      dens_p_y_proj[p,y] = sum((to_vector(n_p_l_y_proj[y,p,1:n_lbins]))); // true population
+
+      theta_proj[p,y] = ((1/(1+exp(-(beta_obs_int + beta_obs*log(dens_p_y_proj[p,y] + 1e-6))))));
+
+      dens_p_y_obs_proj[p,y] = bernoulli_rng(theta_proj[p,y]) * exp(normal_rng(log(dens_p_y_proj[p,y] + 1e-6), sigma_obs));
+      // the observed densitieis as opposed to the true densities
       
     } // close patches 
     
     for(q in 1:number_quantiles){
       // calculate every range quantile q for every year y
-      range_quantiles_proj[q, y] = calculate_range_quantile(np, patches, dens_p_y_hat_proj[,y], quantiles_calc[q]);
+      range_quantiles_proj[q, y] = calculate_range_quantile(np, patches, dens_p_y_obs_proj[,y], quantiles_calc[q]);
     }
       
 
-      centroid_proj[y] = sum(to_vector(dens_p_y_hat_proj[,y]) .* patches) / sum(to_vector(dens_p_y_hat_proj[,y])); // calculate center of gravity
+      centroid_proj[y] = sum(to_vector(dens_p_y_obs_proj[,y]) .* patches) / sum(to_vector(dens_p_y_obs_proj[,y])); // calculate center of gravity
       
   } // close run forecast 
   
