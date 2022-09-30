@@ -17,7 +17,10 @@ fit_drm <- function(run_name = "test",
                     drm_name = "process_sdm",
                     number_quantiles = 3,
                     quantiles_calc = c(0.05, 0.5, 0.95),
-                    known_f = 0) {
+                    known_f = 0,
+                    known_historic_f = 1,
+                    sigma_obs_cv = 0.1,
+                    h = 0.8) {
   
   
   results_path <- file.path("results",run_name)
@@ -29,6 +32,12 @@ fit_drm <- function(run_name = "test",
   
   
   load(here("processed-data","stan_data_prep.Rdata"))
+  
+  if (known_historic_f == 0){
+    
+    f <- matrix(0.2, nrow = nrow(f), ncol = ncol(f))
+    
+  }
   
   if (known_f == 0){
     
@@ -71,7 +80,9 @@ fit_drm <- function(run_name = "test",
     exp_yn = exp_yn,
     process_error_toggle = process_error_toggle,
     number_quantiles = number_quantiles,
-    quantiles_calc = quantiles_calc
+    quantiles_calc = quantiles_calc,
+    sigma_obs_cv = sigma_obs_cv,
+    h = h
   )
   nums <- 100 * exp(-.2 * (0:(n_ages - 1)))
   

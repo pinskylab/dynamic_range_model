@@ -166,6 +166,9 @@ data {
   
   int n_p_l_y[np, n_lbins, ny_train]; // SUM number of individuals in each length bin, patch, and year; used for age composition only, because the magnitude is determined by sampling effort
   
+  real sigma_obs_cv; // cv of sigma_obs prior
+  
+  real h; // steepness
 }
 
 transformed data{
@@ -255,6 +258,8 @@ parameters{
   
   real<upper = 0.8> p_length_50_sel; // length at 50% selectivity
   
+  real<lower = 1e-6> sel_delta;
+  
   real<lower=0> beta_obs; // controls how fast detection goes up with abundance
   
   // real<lower=0, upper=0.333> d; // dispersal fraction (0.333 = perfect admixture)
@@ -263,9 +268,7 @@ parameters{
   
   vector<lower = 0, upper = 1>[np] init_dep;
   
-  real<lower = 0> theta_d;
-  
-  real<lower=0, upper=1> h;
+  real<lower = 0, upper = 2> theta_d;
   
   real beta_t; // responsiveness of movement to temperature
   
@@ -282,8 +285,6 @@ transformed parameters{
   matrix[np, ny_train] T_adjust; // tuning parameter for sbt suitability in each patch*year
   
   real length_50_sel;
-  
-  real sel_delta;
   
   real mean_recruits;
   
@@ -364,19 +365,11 @@ transformed parameters{
         }
         
         
-        sel_delta = 1;
-        
         length_50_sel = loo * p_length_50_sel; // Dan made a note to change this sometime
         
         selectivity_at_bin = 1.0 ./ (1 + exp(-log(19) * ((bin_mids - length_50_sel) / sel_delta))); // selectivity ogive at age
         
-        // mean_selectivity_at_age = length_at_age_key * selectivity_at_bin; // calculate mean selectivity at age given variance in length at age
-        
-        //  print("mean selectivity at age is ",mean_selectivity_at_age); // check that counts are different for every year
-        
         mean_recruits = exp(log_mean_recruits);
-        
-        //print("mean recruits is ",mean_recruits);
         
         // calculate temperature-dependence correction factor for each patch and year depending on sbt
         for(p in 1:np){
@@ -423,11 +416,6 @@ transformed parameters{
                   
                   T_adjust_m[y,i,j] = fmin(500,exp(beta_t * (T_adjust[i,y] - T_adjust[j,y]))); 
                 }
-                
-                // print("T_adjust in patch ",i," and year ",y," is ",T_adjust[i,y]); 
-                //           print("T_adjust in patch ",j," and year ",y," is ",T_adjust[i,y]); 
-                
-                // print("T_adjust_m in year ",y," from patch ",i," into patch ",j," is ",T_adjust_m[y,i,j]);
               }
             }
             tax_m[y] = adj_m .* T_adjust_m[y]; 
@@ -447,10 +435,7 @@ transformed parameters{
               print(diagonal(mov_inst_m[y]));
               
             }
-            
-            // print("column sums of the annualized movement matrix in year ",y," is ",colSums(mov_m[y]));
-            //  print("the annualized movement matrix in year ",y," is ",mov_m[y]);
-          }
+                      }
         } else {
           for(z in 1:np){
             for(x in 1:np){
@@ -464,7 +449,6 @@ transformed parameters{
         for(p in 1:np){
           for(a in 1:n_ages){
             if(a==1){
-              // n_p_a_y_hat[p,a,1] = mean_recruits[p] * T_adjust[p,1] * exp(raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
               
               if(T_dep_recruitment==1 && spawner_recruit_relationship==0){
                 n_p_a_y_hat[1,p,a] = init_dep[p] * mean_recruits * beta_rec * T_adjust[p,1] * exp(sigma_r * raw[1] - pow(sigma_r,2) / 2); // initialize age 0 with mean recruitment in every patch
@@ -495,15 +479,12 @@ transformed parameters{
           
           if (y == 2){ 
             rec_dev[y-1]  =  sigma_r * raw[y]; // initialize first year of rec_dev with raw (process error) -- now not patch-specific
-            // need to fix this awkward burn in
           } // close y==2 case  
           else {
             
             rec_dev[y-1] =  alpha * rec_dev[y-2] +  sqrt(1 - pow(alpha,2)) *  sigma_r * raw[y]; 
             
           } // close ifelse
-          
-          // print(rec_dev[y-1]);
           
           // describe population dynamics
           for(p in 1:np){
@@ -618,15 +599,10 @@ transformed parameters{
             n_p_l_y_hat[y,p,1:n_lbins] = ((l_at_a_key' * to_vector(n_p_a_y_hat[y,p,1:n_ages])) .* selectivity_at_bin)'; // convert numbers at age to numbers at length. The assignment looks confusing here because this is an array of length y containing a bunch of matrices of dim p and n_lbins
             // see https://mc-stan.org/docs/2_18/reference-manual/array-data-types-section.html
             
-            // n_p_l_y_hat[y,p,1:n_lbins]  =  (to_vector(n_p_l_y_hat[y,p,1:n_lbins])  .* selectivity_at_bin)';
-            
             dens_p_y_hat[p,y] = sum((to_vector(n_p_l_y_hat[y,p,1:n_lbins])));
-            
-            //  print("for patch ",p," in year ",y," dens_p_y_hat is ",dens_p_y_hat[p, y]);
             
             theta[p,y] = ((1/(1+exp(-(beta_obs_int + beta_obs*log(dens_p_y_hat[p,y] + 1e-6))))));
             
-            // print(theta[p,y]);
           } // close patches
           
           for(q in 1:number_quantiles){
@@ -662,11 +638,9 @@ model {
   
   sigma_r_raw ~ normal(.2,.1);
   
-  sigma_obs ~ normal(0.1,.2);
+  sigma_obs ~ normal(0.2,sigma_obs_cv);
   
   log_mean_recruits ~ normal(7,5);
-  
-  h ~ normal(0.6, 0.25);
   
   log_r0 ~ normal(15,5);
   
@@ -680,22 +654,13 @@ model {
   
   alpha ~  beta(12,20); // concentrated around 0.4
   
-  d ~ normal(0.1, 0.1); // dispersal rate as a proportion of total population size within the patch
-  
-  // sigma ~ normal(1,.1);  // total error prior
-  // 
-  // proc_ratio ~ beta(2,2);
-  // 
-  
-  
-  // sigma_obs ~ normal(.1, .1); // think more about whether these numbers are reasonable
+  d ~ normal(0.1, 0.1); // diffusion rate as a proportion of total population size within the patch
   
   p_length_50_sel ~ normal(length_50_sel_guess/loo, .2);
   
-  // log_scalar ~ normal(log(2),1);
+  sel_delta ~ normal(2,4);
   
-  
-  theta_d ~ normal(0.5,.1);
+  theta_d ~ normal(0.5,.5);
   
   
   for(y in 2:ny_train) {
@@ -716,10 +681,6 @@ model {
               n = sum(n_p_l_y[p,1:n_lbins,y]);
               
               dml_tmp = lgamma(n + 1) -  sum(lgamma(n * prob + 1)) + lgamma(theta_d * n) - lgamma(n + theta_d * n) + sum(lgamma(n * prob + theta_d * n * prob_hat) - lgamma(theta_d * n * prob_hat)); // see https://github.com/merrillrudd/LIME/blob/9dcfc7f7d5f56f280767c6900972de94dd1fea3b/src/LIME.cpp#L559 for log transformation of dirichlet-multinomial in Thorston et al. 2017
-              
-              // dml_tmp = lgamma(n + 1) - sum(lgamma(n * prob_hat + 1)) + (lgamma(theta_d * n) - lgamma(n + theta_d * n)) * prod(((lgamma(n * prob_hat + theta_d * n * prob))./(lgamma(theta_d * n * prob))));
-              
-              // test = prod(1:10);
               
               target += (dml_tmp);
               
@@ -755,6 +716,8 @@ generated quantities {
   
   // obs denotes the actual observed data as opposed to the true state
   // anything indexed over ny_proj+1 starts the year before the first forecast (i.e., the last year of the model fit) 
+  
+  matrix[np, ny_train] abund_p_y_pp;
   matrix[np, n_ages] n_p_a_y_obs_proj[ny_proj+1];
   matrix[np, n_lbins] n_p_l_y_obs_proj[ny_proj+1];
   matrix[np, n_ages] n_p_a_y_proj[ny_proj+1];
@@ -776,6 +739,19 @@ generated quantities {
   vector[ny_proj] centroid_proj; 
   matrix[number_quantiles, ny_proj] range_quantiles_proj; 
   matrix[np, ny_proj] theta_proj; // Bernoulli probability of encounter  
+
+
+// generate posterior predictive distributions for training data
+
+  for (y in 1:ny_train){
+    
+    for (p in 1:np){
+      // ignoring error around length sampling for now
+      abund_p_y_pp[p,y] = bernoulli_rng(theta[p,y]) * exp(normal_rng(log(dens_p_y_hat[p,y] + 1e-6), sigma_obs)); 
+        
+    }
+    
+  }
 
   if(run_forecast==1){
     for(p in 1:np){
