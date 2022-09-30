@@ -40,6 +40,7 @@ max_age = 20
 length_50_sel_guess= 20 # THIS IS A RANDOM GUESS, I can't find help in the stock assessment
 age_sel= 0
 sel_100 = 3 # not sure if this should be 2 or 3. it's age 2, but it's the third age category because we start at 0, which I think Stan will classify as 3...?
+h = 0.8
 
 if(time_varying_f==FALSE){
   f_constant=0.334 

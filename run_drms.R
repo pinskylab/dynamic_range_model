@@ -20,7 +20,7 @@ fit_drms <- TRUE
 
 if (fit_drms){
 drm_fits <-  ctrl_file %>%
-  filter(id == "v0.6") %>% 
+  filter(id == "v0.1") %>% 
   mutate(fits = pmap(
     list(
       run_name = id,
@@ -56,7 +56,7 @@ drm_fits <-  ctrl_file %>%
 
 # process results ---------------------------------------------------------
 
-diagnostic_fit <- drm_fits$fits[[1]]
+diagnostic_fit <- drm_fits$fits[[drm_fits$id == "v0.6"]]
 
 rstan::check_hmc_diagnostics(diagnostic_fit)
 
