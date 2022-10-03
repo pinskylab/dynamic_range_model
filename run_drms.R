@@ -16,7 +16,7 @@ sapply(funs, function(x)
 
 ctrl_file <- read_csv("control_file.csv")
 
-fit_drms <- TRUE
+fit_drms <- FALSE
 
 if (fit_drms){
 drm_fits <-  ctrl_file %>%
@@ -56,7 +56,7 @@ drm_fits <-  ctrl_file %>%
 
 # process results ---------------------------------------------------------
 
-diagnostic_fit <- drm_fits$fits[[drm_fits$id == "v0.6"]]
+diagnostic_fit <- drm_fits$fits[[which(drm_fits$id == "v0.1")]]
 
 rstan::check_hmc_diagnostics(diagnostic_fit)
 
