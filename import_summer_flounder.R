@@ -14,8 +14,12 @@ OApath <- "~/github/OceanAdapt-update2020/"
 load(paste0(OApath,"data_clean/dat_exploded.rds")) # get zero-inflated survey data
 # for some reason this line isn't working for me and I have to import it manually, not sure why
 
-load(paste0(OApath,"data_raw/neus_Survdat.RData")) # get length data
+load(paste0(OApath,"data_raw/neus_Survdat.RData")) 
+
+
+# note that in the NEFSC survey you may need to aggregate across sex classes ('CATCHSEX' column) for correct abundance/length values. for summer flounder that column is always 0 so it's not an issue
 load(paste0(OApath, "data_raw/neus_SVSPP.RData")) # get taxonomy
+
 
 spp_of_interest <- c("Paralichthys dentatus")
 reg_of_interest <- c("Northeast US Fall")
@@ -52,7 +56,7 @@ if(explore_data==TRUE){
   
   old_dat_exploded <- dat.exploded
   rm(dat.exploded)
-
+  
   old_dat_exploded_neus <- old_dat_exploded %>% 
     filter(region==reg_of_interest) 
   
@@ -76,7 +80,7 @@ if(explore_data==TRUE){
     geom_tile()  
   
   
-  }
+}
 
 
 max_yr <- 2016 # 2017 is missing, for some reason 
@@ -96,14 +100,13 @@ hauldat <- survdat %>%
          "lat"=LAT,
          "lon"=LON)
 
-
 # tidy length data
 len_flounder_prep <- survdat %>% 
   # create a haulid for joining with dat.exploded
   mutate(haulid = paste(formatC(CRUISE6, width=6, flag=0), formatC(STATION, width=3, flag=0), formatC(STRATUM, width=4, flag=0), sep='-')) %>% 
   select(haulid, SVSPP, LENGTH, NUMLEN) %>% 
   left_join(spp, by="SVSPP") %>% # get species names from species codes
-  mutate(spp = str_to_sentence(SCINAME)) %>% # change to format of sppOfInt
+  mutate(spp = str_to_sentence(SCINAME)) %>%
   select(spp, haulid, LENGTH, NUMLEN) %>%
   filter(!is.na(LENGTH),
          spp == spp_of_interest,
@@ -121,7 +124,16 @@ len_flounder <- expand.grid(haulid=unique(dat_exploded_neus$haulid), length=seq(
   mutate(number_at_length = replace_na(number_at_length, 0)) %>%  # fill in absences with true zeroes
   left_join(hauldat)
 
+# count up all abundances for SDMs, which don't use length data 
+sdm_flounder <- len_flounder %>% 
+  group_by_at(vars(c(-number_at_length, -length))) %>% 
+  summarise(abundance = sum(number_at_length))
+
 flounder_train <- len_flounder %>% 
+  filter(year >= min_yr,
+         year < forecast_yr_1)
+
+sdm_train <- sdm_flounder %>% 
   filter(year >= min_yr,
          year < forecast_yr_1)
 
@@ -129,5 +141,12 @@ flounder_test <- len_flounder %>%
   filter(year >= forecast_yr_1,
          year <= max_yr)
 
+sdm_test <- sdm_flounder %>% 
+  filter(year >= forecast_yr_1,
+         year <= max_yr)
+
 write_csv(flounder_train, here("processed-data","flounder_catch_at_length_fall_training.csv"))
 write_csv(flounder_test, here("processed-data","flounder_catch_at_length_fall_testing.csv"))
+
+write_csv(sdm_train, here("processed-data","flounder_catch_for_sdm_fall_training.csv"))
+write_csv(sdm_test, here("processed-data","flounder_catch_for_sdm_fall_testing.csv"))
