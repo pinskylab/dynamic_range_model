@@ -11,7 +11,6 @@ library(Matrix)
 library(geosphere) # used for setting up lat bands
 #library(purrr)
 library(lme4) # used for interpolating a few temperature values
-
 funs <- list.files("functions")
 sapply(funs, function(x) source(file.path("functions",x)))
 
@@ -24,7 +23,7 @@ dat_test <- read_csv(here("processed-data","flounder_catch_at_length_fall_testin
 # make model decisions that involve data prep
 #############
 trim_to_abundant_patches=FALSE
-make_data_plots <- FALSE
+make_data_plots <- TRUE
 time_varying_f = TRUE
 
 
@@ -75,10 +74,11 @@ if(make_data_plots==TRUE){
                         scale= 4,
                         stat="density") +
     scale_y_discrete(expand = c(0, 0))  + 
-    facet_wrap(~lat_floor) + 
-    coord_flip()
+    facet_wrap(~lat_floor, ncol=5) + 
+    coord_flip() +
+    theme(axis.text.x=element_text(angle = -90))
   # gglength  
-  ggsave(gglength, filename=here("results","summer_flounder_length_freq.png"))
+  ggsave(gglength, filename=here("results","summer_flounder_length_freq.png"), width=9, height=4, scale=1.75)
   
   # by patch -- 
   ggpatchlength <- dat %>% 
@@ -92,9 +92,9 @@ if(make_data_plots==TRUE){
                         scale= 4,
                         stat="density") +
     scale_y_discrete(expand = c(0, 0)) +
-    facet_wrap(~lat_floor, scales = "free_y")
+    facet_wrap(~lat_floor, scales = "free_y", ncol=5)
   # ggpatchlength  
-  ggsave(ggpatchlength, filename=here("results","summer_flounder_length_freq_by_patch.png"), height=8, width=5, dpi=160)
+  ggsave(ggpatchlength, filename=here("results","summer_flounder_length_freq_by_patch.png"), height=5, width=8, dpi=160)
   # not sure this doesn't have any data in the other patches, maybe they are missing years? 
 }
 
@@ -146,9 +146,9 @@ dat_train_dens <- dat %>%
   mutate(lat_floor = floor(lat)) %>% 
   filter(lat_floor %in% patches) %>% 
   group_by(haulid) %>% 
-  mutate(dens = sum(number_at_length)) %>% # get total no. fish in each haul, of any size
+  mutate(dens = sum(number_at_length)) %>% # get total no. fish in each haul, of any size (often zeros) 
   group_by(year, lat_floor) %>% 
-  summarise(mean_dens = mean(dens)) %>%  # get mean density (all sizes) / haul for the patch*year combo 
+  summarise(mean_dens = mean(dens)) %>%  # get mean density (all sizes) / haul for the patch*year combo, including zeros 
   ungroup() %>% 
   mutate(patch = as.integer(as.factor(lat_floor)))
 
@@ -185,6 +185,16 @@ patchdat <- dat %>%
   ungroup() %>% 
   mutate(patch = as.integer(as.factor(lat_floor)))
 meanpatcharea <- mean(patchdat$patch_area_km2)
+
+if(make_data_plots==TRUE){
+  gg_year_dens <- dat_train_dens %>% 
+    mutate(density = mean_dens * meanpatcharea) %>% 
+  ggplot() +
+    geom_line(aes(x=year, y=density)) + 
+    facet_wrap(~lat_floor, ncol=5) +
+    labs(title="Summer flounder fall CPUE", x="Year", y="Density per patch")
+  ggsave(gg_year_dens, filename=here("results","training_cpue_by_patch.png"), width=7, height=4, scale=1.2)
+}
 
 dat_train_sbt <- dat %>%   
   mutate(lat_floor = floor(lat)) %>% 
@@ -393,6 +403,7 @@ save(
   f_proj,
   k,
   loo,
+  h,
   t0,
   cv,
   length_50_sel_guess,
