@@ -23,7 +23,7 @@ dat_test <- read_csv(here("processed-data","flounder_catch_at_length_fall_testin
 # make model decisions that involve data prep
 #############
 trim_to_abundant_patches=FALSE
-make_data_plots <- TRUE
+make_data_plots <- FALSE
 time_varying_f = TRUE
 
 
