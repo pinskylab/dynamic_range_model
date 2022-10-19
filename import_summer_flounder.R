@@ -6,7 +6,7 @@ library(stringr)
 library(lubridate)
 here <- here::here
 
-# download from: https://zenodo.org/badge/latestdoi/29789533
+# download from: https://zenodo.org/record/3885625
 # DOI 10.5281/zenodo.3885625
 
 OApath <- "~/github/OceanAdapt-update2020/"

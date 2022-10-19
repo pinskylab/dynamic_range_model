@@ -10,13 +10,15 @@ library(rstanarm)
 
 rstan_options(javascript = FALSE, auto_write = TRUE)
 
+# load fit_drm function 
+# fit_drm() fits the model and writes out the model object and a plot to the results directory
 funs <- list.files("functions")
 sapply(funs, function(x)
   source(file.path("functions", x)))
 
 ctrl_file <- read_csv("control_file.csv")
 
-fit_drms <- FALSE
+fit_drms <- TRUE
 
 if (fit_drms){
 drm_fits <-  ctrl_file %>%
@@ -34,14 +36,15 @@ drm_fits <-  ctrl_file %>%
       known_historic_f = known_historic_f
     ),
     fit_drm,
-    warmup = 1000,
-    iter = 2000,
+    warmup = 10,
+    iter = 20,
     chains = 1,
     cores = 1,
     run_forecast = 1
   ))
 } else {
   drm_fits <- ctrl_file %>%
+    filter(id == "v0.1") %>% 
     mutate(fits = pmap(list(run_name = id), ~ purrr::safely(readr::read_rds)(
         here("results", .x, "stan_model_fit.rds")
     )))
